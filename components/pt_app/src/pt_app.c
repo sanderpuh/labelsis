@@ -31,6 +31,7 @@
 #include "pt_led.h"
 #include "pt_protocol.h"
 #include "ql700_status.h"
+#include "ql700_raster.h"
 #include "pt_session.h"
 #include "pt_transport.h"
 #include "pt_transport_mock.h"
@@ -841,6 +842,89 @@ static esp_err_t ql700_api_status(httpd_req_t *req, const char *ota_av)
         return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"overflow\"}");
     }
     return httpd_resp_send(req, body, n);
+}
+
+/* Stage 3: deliberate, fixed-size QL-700 test print only.
+ * Do not use PT print/feed/cut commands for the QL-700.
+ * The web editor's /api/print remains disabled until the QL bitmap
+ * format, other DK media, and completion status handling are added.
+ */
+static bool ql700_send_to_usb(void *ctx, const uint8_t *data, size_t size)
+{
+    const pt_transport_t *transport = (const pt_transport_t *)ctx;
+    return pt_transport_send(transport, data, size) == (int)size;
+}
+
+static esp_err_t api_ql700_testprint(httpd_req_t *req)
+{
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Connection", "close");
+
+    /* A POST plus exact acknowledgement header is required to avoid
+     * accidental print/cut from a browser, link preview or stale SPA.
+     */
+    char acknowledge[24] = {0};
+    if (httpd_req_get_hdr_value_str(req, "X-QL700-Confirm", acknowledge,
+                                     sizeof acknowledge) != ESP_OK ||
+        strcmp(acknowledge, "print-62mm") != 0) {
+        httpd_resp_set_status(req, "403 Forbidden");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"confirmation_required\"}");
+    }
+    if (req->content_len != 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"unexpected_body\"}");
+    }
+    if (!transport_ready() || !ql700_connected()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"ql700_not_connected\"}");
+    }
+    if (!SESSION_LOCK(150000)) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"busy\"}");
+    }
+
+    ql700_status_t st = {0};
+    bool received = ql700_query_status(&st);
+    if (!received) {
+        SESSION_UNLOCK();
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"ql700_status_unavailable\"}");
+    }
+    /* Explicitly require known continuous 62mm stock, and idle printer.
+     * Die-cut and other width rolls need their own raster geometry.
+     */
+    if (st.media_type != 0x4a || st.media_width_mm != 62 ||
+        st.media_length_mm != 0 || st.error1 != 0 || st.error2 != 0 ||
+        st.phase_type != 0) {
+        SESSION_UNLOCK();
+        httpd_resp_set_status(req, "409 Conflict");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"requires_idle_62mm_continuous_roll\"}");
+    }
+
+    pt_led_set(PT_LED_PRINTING);
+    bool sent = ql700_send_test_page_62mm(ql700_send_to_usb, &s_transport);
+    pt_led_set(transport_ready() ? PT_LED_READY : PT_LED_USB_WAITING);
+    SESSION_UNLOCK();
+
+    if (!sent) {
+        /* Partial USB writes may mean printer needs power-cycling. Avoid
+         * blindly retrying: that can create duplicate or malformed jobs. */
+        httpd_resp_set_status(req, "502 Bad Gateway");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"usb_send_failed_check_printer_before_retry\"}");
+    }
+    /* USB send completed; this does NOT prove the printer finished. */
+    httpd_resp_set_status(req, "202 Accepted");
+    return httpd_resp_sendstr(req,
+        "{\"ok\":true,\"sent\":true,\"printer_complete_verified\":false,"
+        "\"format\":\"62mm_continuous\",\"raster_rows\":360}");
 }
 
 static esp_err_t api_status(httpd_req_t *req)
@@ -1892,6 +1976,10 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/api/print", .method = HTTP_POST,
         .handler = api_print, .user_ctx = NULL,
     };
+    static const httpd_uri_t ql700_test_route = {
+        .uri = "/api/ql700/testprint", .method = HTTP_POST,
+        .handler = api_ql700_testprint, .user_ctx = NULL,
+    };
     static const httpd_uri_t cut_route = {
         .uri = "/api/cut", .method = HTTP_POST,
         .handler = api_cut, .user_ctx = NULL,
@@ -1967,6 +2055,7 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &status_route);
     httpd_register_uri_handler(s_http, &info_route);
     httpd_register_uri_handler(s_http, &print_route);
+    httpd_register_uri_handler(s_http, &ql700_test_route);
     httpd_register_uri_handler(s_http, &cut_route);
     httpd_register_uri_handler(s_http, &feed_route);
     httpd_register_uri_handler(s_http, &scan_route);

@@ -4,6 +4,7 @@
 set(PT_PROTOCOL_SRCS
     ${CMAKE_CURRENT_LIST_DIR}/src/pt_protocol.c
     ${CMAKE_CURRENT_LIST_DIR}/src/ql700_status.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/ql700_raster.c
 )
 set(PT_PROTOCOL_INCLUDE_DIRS
     ${CMAKE_CURRENT_LIST_DIR}/include
