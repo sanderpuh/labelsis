@@ -819,19 +819,20 @@ static esp_err_t ql700_api_status(httpd_req_t *req, const char *ota_av)
             "\"error\":\"ql700_status_timeout_or_invalid\"}");
     }
     const char *primary_error = ql700_primary_error(&st);
+    const bool supported_media = st.media_type == 0x4a && st.media_width_mm == 62 && st.media_length_mm == 0;
     const bool ready = st.error1 == 0 && st.error2 == 0 &&
                        st.media_type != 0 && st.phase_type == 0;
     char body[512];
     int n = snprintf(body, sizeof body,
         "{\"ok\":true,\"transport\":\"usb_host\",\"printer\":\"QL-700\","
-        "\"usb_detected\":true,\"print_supported\":false,"
+        "\"usb_detected\":true,\"print_supported\":%s,"
         "\"ota_available\":%s,\"ready\":%s,"
         "\"media_width_mm\":%u,\"media_length_mm\":%u,"
         "\"media_type\":%u,\"media_kind\":\"%s\","
         "\"error1\":%u,\"error2\":%u,\"error\":\"%s\","
         "\"status_type\":%u,\"phase_type\":%u,"
         "\"phase_number\":%u,\"notification\":%u}",
-        ota_av, ready ? "true" : "false",
+        supported_media ? "true" : "false", ota_av, ready ? "true" : "false",
         (unsigned)st.media_width_mm, (unsigned)st.media_length_mm,
         (unsigned)st.media_type, ql700_media_kind(st.media_type),
         (unsigned)st.error1, (unsigned)st.error2, primary_error,
@@ -853,6 +854,96 @@ static bool ql700_send_to_usb(void *ctx, const uint8_t *data, size_t size)
 {
     const pt_transport_t *transport = (const pt_transport_t *)ctx;
     return pt_transport_send(transport, data, size) == (int)size;
+}
+
+/* Stage 4 -- Browser bitmap endpoint for QL-700 + DK-22205 only.
+ * Body: 360..1500 rows, each 90 bytes, MSB-first head dots.
+ * A full body is received before touching the printer, so a client
+ * disconnect during upload cannot leave a partial job in the printer.
+ * This endpoint is deliberately separate from PT /api/print.
+ */
+static esp_err_t api_ql700_bitmap_print(httpd_req_t *req)
+{
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Connection", "close");
+
+    char confirmation[24] = {0};
+    if (httpd_req_get_hdr_value_str(req, "X-QL700-Confirm", confirmation,
+                                    sizeof confirmation) != ESP_OK ||
+        strcmp(confirmation, "print-62mm") != 0) {
+        httpd_resp_set_status(req, "403 Forbidden");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"confirmation_required\"}");
+    }
+    const size_t body_len = (size_t)req->content_len;
+    if (body_len < (size_t)QL700_BITMAP_MIN_ROWS * QL700_ROW_BYTES ||
+        body_len > (size_t)QL700_BITMAP_MAX_ROWS * QL700_ROW_BYTES ||
+        body_len % QL700_ROW_BYTES != 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"invalid_90_byte_raster_length\"}");
+    }
+    if (!transport_ready() || !ql700_connected()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"ql700_not_connected\"}");
+    }
+
+    uint8_t *bitmap = malloc(body_len);
+    if (!bitmap) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"bitmap_out_of_memory\"}");
+    }
+    size_t received = 0;
+    while (received < body_len) {
+        int n = httpd_req_recv(req, (char *)bitmap + received,
+                               body_len - received);
+        if (n <= 0) {
+            free(bitmap);
+            /* No print commands have been sent. */
+            return ESP_FAIL;
+        }
+        received += (size_t)n;
+    }
+    if (!SESSION_LOCK(150000)) {
+        free(bitmap);
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"busy\"}");
+    }
+    ql700_status_t st = {0};
+    const bool ready = ql700_query_status(&st) &&
+        st.media_type == 0x4a && st.media_width_mm == 62 &&
+        st.media_length_mm == 0 && st.error1 == 0 &&
+        st.error2 == 0 && st.phase_type == 0;
+    if (!ready) {
+        SESSION_UNLOCK();
+        free(bitmap);
+        httpd_resp_set_status(req, "409 Conflict");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"requires_idle_62mm_continuous_roll\"}");
+    }
+
+    const unsigned rows = (unsigned)(body_len / QL700_ROW_BYTES);
+    pt_led_set(PT_LED_PRINTING);
+    const bool sent = ql700_send_bitmap_page_62mm(
+        ql700_send_to_usb, &s_transport, bitmap, (uint16_t)rows);
+    pt_led_set(transport_ready() ? PT_LED_READY : PT_LED_USB_WAITING);
+    SESSION_UNLOCK();
+    free(bitmap);
+    if (!sent) {
+        httpd_resp_set_status(req, "502 Bad Gateway");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"usb_send_failed_check_printer_before_retry\"}");
+    }
+    char response[160];
+    int len = snprintf(response, sizeof response,
+        "{\"ok\":true,\"rows\":%u,\"printer_complete_verified\":false,\"format\":\"62mm_continuous\"}",
+        rows);
+    httpd_resp_set_status(req, "202 Accepted");
+    return httpd_resp_send(req, response, len);
 }
 
 static esp_err_t api_ql700_testprint(httpd_req_t *req)
@@ -1976,6 +2067,10 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/api/print", .method = HTTP_POST,
         .handler = api_print, .user_ctx = NULL,
     };
+    static const httpd_uri_t ql700_bitmap_route = {
+        .uri = "/api/ql700/print", .method = HTTP_POST,
+        .handler = api_ql700_bitmap_print, .user_ctx = NULL,
+    };
     static const httpd_uri_t ql700_test_route = {
         .uri = "/api/ql700/testprint", .method = HTTP_POST,
         .handler = api_ql700_testprint, .user_ctx = NULL,
@@ -2056,6 +2151,7 @@ static esp_err_t http_up(uint16_t port)
     httpd_register_uri_handler(s_http, &info_route);
     httpd_register_uri_handler(s_http, &print_route);
     httpd_register_uri_handler(s_http, &ql700_test_route);
+    httpd_register_uri_handler(s_http, &ql700_bitmap_route);
     httpd_register_uri_handler(s_http, &cut_route);
     httpd_register_uri_handler(s_http, &feed_route);
     httpd_register_uri_handler(s_http, &scan_route);

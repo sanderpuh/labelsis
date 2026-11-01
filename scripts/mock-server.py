@@ -37,7 +37,7 @@ SPA_DIR = os.path.normpath(os.path.join(
 #   "plite"     red, PT-* in mass-storage mode
 #   "mock"      red, only used when use_usb_host=false in pt_app config
 STATE = {
-    "transport":      "usb_host",
+    "transport":      "mock",
     "model":          0x70,        # PT-P700
     "media_width_mm": 12,
     "media_type":     0x01,

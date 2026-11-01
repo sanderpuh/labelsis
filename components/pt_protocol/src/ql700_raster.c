@@ -79,3 +79,46 @@ bool ql700_send_test_page_62mm(ql700_write_fn write, void *ctx)
     const uint8_t finish[] = {0x1a};
     return write(ctx, finish, sizeof finish);
 }
+
+/* Stage 4: DK-22205 browser bitmap stream. The caller supplies one 90-byte
+ * MSB-first, full-head row per feed step (each row is a canvas column).
+ * Explicitly zero the QL-700's 12-dot unprintable strip at both ends.
+ */
+bool ql700_send_bitmap_page_62mm(ql700_write_fn write, void *ctx,
+                                 const uint8_t *bitmap, uint16_t rows)
+{
+    if (!write || !bitmap || rows < QL700_BITMAP_MIN_ROWS ||
+        rows > QL700_BITMAP_MAX_ROWS) return false;
+
+    const uint8_t nul[200] = {0};
+    const uint8_t initialize[] = {0x1b, 0x40};
+    const uint8_t print_info[] = {
+        0x1b, 0x69, 0x7a, 0x86, 0x0a, 62, 0,
+        (uint8_t)(rows & 0xffu), (uint8_t)((rows >> 8) & 0xffu),
+        0, 0, 0, 0
+    };
+    const uint8_t auto_cut[] = {0x1b, 0x69, 0x4d, 0x40};
+    const uint8_t cut_every_label[] = {0x1b, 0x69, 0x41, 1};
+    const uint8_t expanded[] = {0x1b, 0x69, 0x4b, 0x08};
+    const uint8_t margin[] = {0x1b, 0x69, 0x64, 35, 0};
+    if (!write(ctx, nul, sizeof nul) ||
+        !write(ctx, initialize, sizeof initialize) ||
+        !write(ctx, print_info, sizeof print_info) ||
+        !write(ctx, auto_cut, sizeof auto_cut) ||
+        !write(ctx, cut_every_label, sizeof cut_every_label) ||
+        !write(ctx, expanded, sizeof expanded) ||
+        !write(ctx, margin, sizeof margin)) return false;
+
+    uint8_t raster[3 + QL700_ROW_BYTES] = {0x67, 0, QL700_ROW_BYTES};
+    for (uint16_t i = 0; i < rows; ++i) {
+        memcpy(raster + 3, bitmap + (size_t)i * QL700_ROW_BYTES,
+               QL700_ROW_BYTES);
+        raster[3] = 0;                        /* 8 leftmost pins */
+        raster[4] &= 0x0f;                  /* next 4 pins */
+        raster[3 + 88] &= 0xf0;             /* 4 rightmost pins of byte 88 */
+        raster[3 + 89] = 0;                 /* final 8 pins */
+        if (!write(ctx, raster, sizeof raster)) return false;
+    }
+    const uint8_t finish[] = {0x1a};
+    return write(ctx, finish, sizeof finish);
+}

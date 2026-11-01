@@ -531,6 +531,15 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="undo"      class="secondary" type="button" disabled title="Ctrl+Z" data-i18n="btn.undo">undo</button>
         <button id="redo"      class="secondary" type="button" disabled title="Ctrl+Y" data-i18n="btn.redo">redo</button>
       </div>
+      <!-- Stage 4: offline QL-700 preview, auto-detect when connected -->
+      <div class="row group-start" style="margin-top:.5rem">
+        <label for="ql700-layout">Printer layout</label>
+        <select id="ql700-layout" aria-label="Printer layout (offline preview)">
+          <option value="auto">Auto (detected printer / PT fallback)</option>
+          <option value="ql700">QL-700 · DK-22205 · 62 mm continuous</option>
+        </select>
+        <span class="muted">Offline preview only; printing still requires QL-700 detection.</span>
+      </div>
       <!-- Group: print actions -->
       <div class="row group-start" style="margin-top:.5rem">
         <label data-i18n-attr="title:field.auto-cut.help" title="Cut the tape after each label. Brother printers feed ~25 mm of leader tape after each cut, which gets wasted -- leave off if you're printing a single label and don't want the leader to bin.">
@@ -1205,9 +1214,17 @@ const TAPES = {
   12: { print: 70,  margin: 29, dots: 84  },
   18: { print: 112, margin: 8,  dots: 128 },
   24: { print: 128, margin: 0,  dots: 170 },
+  62: { print: 696, margin: 12, dots: 720 }, /* QL-700 DK-22205 */
 };
 
 let printer    = null;  // last /api/status response
+const QL_LAYOUT_KEY = "labelsis:ql700Layout";
+let offlineQlLayout = localStorage.getItem(QL_LAYOUT_KEY) === "ql700";
+function ql700Layout() {
+  if (printer?.printer === "QL-700") return true;
+  if (printer?.ok && printer?.transport === "usb_host") return false;
+  return offlineQlLayout;
+}
 let deviceInfo = null;  // last /api/info  response (cached, refreshed on demand)
 
 /* Sticky tape-width fallback. When the printer is offline (and so the
@@ -1251,7 +1268,7 @@ async function refreshStatus() {
      * reload-while-offline picks the right canvas size. Only writes
      * when the value actually changed -- avoids spamming localStorage
      * once per 3-s tick. */
-    if (j && j.ok && TAPES[j.media_width_mm] && j.media_width_mm !== lastSeenTapeMm) {
+    if (j && j.ok && j.printer !== "QL-700" && TAPES[j.media_width_mm] && j.media_width_mm !== lastSeenTapeMm) {
       lastSeenTapeMm = j.media_width_mm;
       try { localStorage.setItem(LAST_TAPE_KEY, String(lastSeenTapeMm)); } catch {}
     }
@@ -1443,6 +1460,19 @@ function renderStatus(j) {
     return;
   }
 
+  if (j.printer === "QL-700") {
+    const fields = [
+      ["printer", "Brother QL-700"],
+      ["media", `${j.media_width_mm}mm ${j.media_kind || "unknown"}`],
+      ["print support", j.print_supported ? "DK-22205 ready" : "unsupported DK roll"],
+      ["status", j.ready ? "ready" : (j.error || "not ready")],
+      ["error1/2", `${j.error1 ?? 0} / ${j.error2 ?? 0}`],
+      ["phase", PHASE_TYPES[j.phase_type] || "unknown"],
+    ];
+    for (const [k, v] of fields)
+      g.innerHTML += `<span class="k">${escapeHtml(k)}</span><span>${escapeHtml(String(v))}</span>`;
+    return;
+  }
   const info = deviceInfo && deviceInfo.ok ? deviceInfo : {};
   const tape = TAPES[j.media_width_mm];
   const tapeColor = TAPE_COLORS[j.tape_color_id];
@@ -1481,7 +1511,7 @@ function renderStatus(j) {
  * scaffolding is type-dispatched so adding them is a render-fn +
  * a property-panel section, not a rewrite.
  */
-const HEAD_PX = 128;          /* PT-* head height */
+let HEAD_PX = 128;          /* PT-*: 128 dots; QL-700: 720 dots */
 
 /* The canvas always shows the full HEAD_PX-wide head extent so the
  * user has a stable visual frame regardless of which tape is
@@ -1497,7 +1527,7 @@ const PAD     = 24;           /* extra canvas margin so selection
                                  the on-screen rulers. Only applied
                                  for the on-screen redraw -- packRaster
                                  uses an unpadded redraw(true). */
-const PX_PER_MM = 180 / 25.4; /* PT-* print head is 180 dpi          */
+let PX_PER_MM = 180 / 25.4; /* QL-700 will use 300 dpi */
 const mmToPx = mm => mm * PX_PER_MM;
 /* Soft cap on auto-extending label width -- protects against
  * sluggishness from a stray element dragged off-canvas. 2500 px
@@ -2518,14 +2548,17 @@ function redraw(forPrint = false) {
    * print path bypasses persistence -- it builds a tight raster on a
    * different canvas and shouldn't trigger an autosave. */
   if (!forPrint) saveSession();
+  HEAD_PX = ql700Layout() ? 720 : 128;
+  PX_PER_MM = ql700Layout() ? (300 / 25.4) : (180 / 25.4);
   const c    = document.getElementById("preview");
   const ctx  = c.getContext("2d");
   /* Live tape width when /api/status answered with one; otherwise the
    * last width we saw on this browser (sticky via localStorage), or
    * 24 mm on a brand-new install. See LAST_TAPE_KEY. */
-  const tape = printer && printer.ok && TAPES[printer.media_width_mm]
-    ? TAPES[printer.media_width_mm]
-    : TAPES[lastSeenTapeMm];
+  const tape = ql700Layout() ? TAPES[62] : (
+    printer && printer.ok && TAPES[printer.media_width_mm]
+      ? TAPES[printer.media_width_mm]
+      : (TAPES[lastSeenTapeMm] || TAPES[24]));
   const printPx  = tape ? tape.print  : 128;
   const marginPx = tape ? tape.margin : 0;
   /* Per-side breakdown within the canvas (head extent):
@@ -2566,6 +2599,10 @@ function redraw(forPrint = false) {
     printW = Math.min(wanted, PRINT_W_MAX);
   }
 
+  if (ql700Layout()) {
+    if (printW > 1500) overflow = true;
+    printW = Math.max(360, Math.min(1500, printW));
+  }
   if (forPrint) {
     /* Tight canvas, no padding -- packRaster reads this directly so
      * the printed bitmap stays exactly head-height x printW. */
@@ -2935,14 +2972,16 @@ function drawSelectionChrome(ctx, el) {
 /* Pack the current canvas to the 16-byte-per-raster-row layout
  * pt_bitmap_to_raster expects: for each raster line (= canvas column),
  * 16 bytes encoding the 128 pins MSB-first. */
-function packRaster(canvas) {
+function packRaster(canvas, ql700 = false) {
   const ctx  = canvas.getContext("2d");
   const w    = canvas.width;
   const data = ctx.getImageData(0, 0, w, canvas.height).data;
-  const out  = new Uint8Array(w * 16);
-  const h    = Math.min(canvas.height, 128);
+  const rowBytes = ql700 ? 90 : 16;
+  const out = new Uint8Array(w * rowBytes);
+  const h = Math.min(canvas.height, ql700 ? 720 : 128);
   for (let x = 0; x < w; x++) {
     for (let y = 0; y < h; y++) {
+      if (ql700 && (y < 12 || y >= 708)) continue; // unprintable head margins
       const i = (y * w + x) * 4;
       /* Ink only when the pixel is BOTH opaque AND below the
        * luminance threshold. Transparent pixels (alpha < 128) are
@@ -2951,24 +2990,38 @@ function packRaster(canvas) {
        * was last painted (often 0,0,0,0 by canvas default). */
       if (data[i+3] < 128) continue;
       const lum = (data[i] + data[i+1] + data[i+2]) / 3;
-      if (lum < 128) out[x * 16 + (y >> 3)] |= 0x80 >> (y & 7);
+      if (lum < 128) out[x * rowBytes + (y >> 3)] |= 0x80 >> (y & 7);
     }
   }
   return out;
 }
 
+document.getElementById("ql700-layout").value = offlineQlLayout ? "ql700" : "auto";
+document.getElementById("ql700-layout").addEventListener("change", ev => {
+  offlineQlLayout = ev.target.value === "ql700";
+  localStorage.setItem(QL_LAYOUT_KEY, offlineQlLayout ? "ql700" : "auto");
+  redraw();
+});
 async function postPrint() {
+  const isQl = printer?.printer === "QL-700";
   const c    = document.getElementById("preview");
   redraw(true);              /* clean canvas: elements only */
-  const body = packRaster(c);
-  redraw();                  /* restore overlay UI */
+  const oversizedQl = isQl && (
+    (canvasOpts.labelWidthMode === "fixed" && mmToPx(canvasOpts.labelWidthMm) > 1500) ||
+    elements.some(el => { const b = elementBounds(el); return b.x + b.w > 1500; })
+  );
+  const body = oversizedQl ? null : packRaster(c, isQl);
+  redraw();
+  if (oversizedQl) throw new Error("ql700_label_exceeds_127mm_limit");                  /* restore overlay UI */
   const headers = {
     "Content-Type":   "application/octet-stream",
     "X-Auto-Cut":     document.getElementById("print-auto-cut").checked.toString(),
     "X-Mirror":       document.getElementById("print-mirror").checked.toString(),
     "X-Chain":        document.getElementById("print-chain").checked.toString(),
   };
-  const r = await fetch(apiURL("/api/print"), { method: "POST", headers, body });
+  if (isQl) headers["X-QL700-Confirm"] = "print-62mm";
+  const r = await fetch(apiURL(isQl ? "/api/ql700/print" : "/api/print"),
+                        { method: "POST", headers, body });
   const j = await r.json();
   if (!j.ok) throw new Error(j.error);
   return j;
@@ -2980,7 +3033,9 @@ async function doPrint() {
   log(t("msg.printing"));
   try {
     const j = await postPrint();
-    log(t("msg.print.done", { rows: j.rows }), true);
+    log(j.printer_complete_verified === false
+      ? `QL-700: ${j.rows} rows sent over USB (physical completion not verified)`
+      : t("msg.print.done", { rows: j.rows }), true);
   } catch (e) {
     log(t("msg.print.error", { error: e.message }), false);
   } finally {
@@ -3587,16 +3642,29 @@ function refreshPrintButtons() {
    * waiting; this just disables the button up-front so the user
    * doesn't get a delayed error. */
   const noPrint = !printer || !printer.ok || printer.transport !== "usb_host";
+  const badQlMedia = printer?.printer === "QL-700" &&
+    !(printer.ready && printer.print_supported && printer.media_width_mm === 62 &&
+      printer.media_type === 74 && printer.media_length_mm === 0);
   const print = document.getElementById("print");
   const all   = document.getElementById("print-all");
   if (!print || !all) return;
-  print.disabled = err || noPrint || printingInProgress;
-  all.disabled   = err || noPrint || printingInProgress;
+  print.disabled = err || noPrint || badQlMedia || printingInProgress;
+  all.disabled   = err || noPrint || badQlMedia || printingInProgress;
+  for (const id of ["print-mirror", "print-chain"]) {
+    document.getElementById(id).disabled = printer?.printer === "QL-700";
+  }
+  if (printer?.printer === "QL-700") {
+    document.getElementById("print-auto-cut").checked = true;
+    document.getElementById("print-auto-cut").disabled = true;
+  } else {
+    document.getElementById("print-auto-cut").disabled = false;
+  }
   const tip = err     ? "Fix barcode / QR errors before printing"
             : noPrint ? "No printer attached -- design now, print when it shows up"
             : "";
-  print.title = tip;
-  all.title   = tip;
+  const qlMediaTip = "QL-700 requires a ready 62 mm continuous DK-22205 roll";
+  print.title = badQlMedia ? qlMediaTip : tip;
+  all.title   = badQlMedia ? qlMediaTip : tip;
   if (_lastPrintErr !== null && _lastPrintErr !== err) renderLayerList();
   _lastPrintErr = err;
 }

@@ -29,6 +29,16 @@ typedef bool (*ql700_write_fn)(void *ctx, const uint8_t *data, size_t size);
  */
 bool ql700_send_test_page_62mm(ql700_write_fn write, void *ctx);
 
+#define QL700_BITMAP_MIN_ROWS     360u /* approximately 30.5mm long */
+#define QL700_BITMAP_MAX_ROWS    1500u /* cap ~127mm to bound ESP heap */
+
+/* Input is row-major 90 bytes per raster line, exactly 720 MSB-first pins.
+ * Auto-cut is always ON. The 12 unprintable pins at each edge are zeroed.
+ * Returns true on successful USB submission, not verified completion.
+ */
+bool ql700_send_bitmap_page_62mm(ql700_write_fn write, void *ctx,
+                                 const uint8_t *bitmap, uint16_t rows);
+
 /* Deterministic 90-byte raster used by the print job; testable offline. */
 void ql700_test_row(uint16_t row_index, uint8_t out[QL700_ROW_BYTES]);
 
