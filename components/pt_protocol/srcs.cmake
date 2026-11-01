@@ -3,6 +3,7 @@
 # CMAKE_CURRENT_LIST_DIR so paths resolve from this file's location.
 set(PT_PROTOCOL_SRCS
     ${CMAKE_CURRENT_LIST_DIR}/src/pt_protocol.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/ql700_status.c
 )
 set(PT_PROTOCOL_INCLUDE_DIRS
     ${CMAKE_CURRENT_LIST_DIR}/include

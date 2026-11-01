@@ -30,6 +30,7 @@
 #include "pt_dns.h"
 #include "pt_led.h"
 #include "pt_protocol.h"
+#include "ql700_status.h"
 #include "pt_session.h"
 #include "pt_transport.h"
 #include "pt_transport_mock.h"
@@ -772,6 +773,76 @@ static const char *err_kind(pt_err_t e)
     }
 }
 
+/* A read-only QL-700 probe. ESC i S asks for status; it does not move media.
+ * Do NOT use the PT session query/print routines with the QL protocol.
+ */
+static bool ql700_query_status(ql700_status_t *out)
+{
+    static const uint8_t request[] = {0x1b, 0x69, 0x53};
+    uint8_t frame[32];
+    size_t collected = 0;
+    if (pt_transport_send(&s_transport, request, sizeof request) !=
+        (int)sizeof request) return false;
+
+    /* Allow fragmented USB frames and short timeouts. Bounded polling. */
+    for (int i = 0; i < 5 && collected < sizeof frame; i++) {
+        size_t received = 0;
+        if (pt_transport_recv(&s_transport, frame + collected,
+                              sizeof frame - collected, &received, 300) != 0)
+            return false;
+        if (received > sizeof frame - collected) return false;
+        collected += received;
+    }
+    return ql700_status_decode(frame, collected, out);
+}
+
+static esp_err_t ql700_api_status(httpd_req_t *req, const char *ota_av)
+{
+    if (!transport_ready()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"printer\":\"QL-700\",\"error\":\"no_printer\"}");
+    }
+    if (!SESSION_LOCK(500)) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"printer\":\"QL-700\",\"error\":\"busy\"}");
+    }
+    ql700_status_t st = {0};
+    bool success = ql700_query_status(&st);
+    SESSION_UNLOCK();
+    if (!success) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"printer\":\"QL-700\",\"usb_detected\":true,"
+            "\"error\":\"ql700_status_timeout_or_invalid\"}");
+    }
+    const char *primary_error = ql700_primary_error(&st);
+    const bool ready = st.error1 == 0 && st.error2 == 0 &&
+                       st.media_type != 0 && st.phase_type == 0;
+    char body[512];
+    int n = snprintf(body, sizeof body,
+        "{\"ok\":true,\"transport\":\"usb_host\",\"printer\":\"QL-700\","
+        "\"usb_detected\":true,\"print_supported\":false,"
+        "\"ota_available\":%s,\"ready\":%s,"
+        "\"media_width_mm\":%u,\"media_length_mm\":%u,"
+        "\"media_type\":%u,\"media_kind\":\"%s\","
+        "\"error1\":%u,\"error2\":%u,\"error\":\"%s\","
+        "\"status_type\":%u,\"phase_type\":%u,"
+        "\"phase_number\":%u,\"notification\":%u}",
+        ota_av, ready ? "true" : "false",
+        (unsigned)st.media_width_mm, (unsigned)st.media_length_mm,
+        (unsigned)st.media_type, ql700_media_kind(st.media_type),
+        (unsigned)st.error1, (unsigned)st.error2, primary_error,
+        (unsigned)st.status_type, (unsigned)st.phase_type,
+        (unsigned)st.phase_number, (unsigned)st.notification);
+    if (n < 0 || (size_t)n >= sizeof body) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"overflow\"}");
+    }
+    return httpd_resp_send(req, body, n);
+}
+
 static esp_err_t api_status(httpd_req_t *req)
 {
     cors_headers(req);
@@ -796,9 +867,7 @@ static esp_err_t api_status(httpd_req_t *req)
      * ota_gate_open. */
     const char *ota_av = ota_gate_open() ? "true" : "false";
     if (ql700_connected()) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req,
-            "{\"ok\":false,\"transport\":\"usb_host\",\"printer\":\"QL-700\",\"usb_detected\":true,\"error\":\"ql700_protocol_pending\"}");
+        return ql700_api_status(req, ota_av);
     }
     if (!transport_ready()) {
         char body[160];
