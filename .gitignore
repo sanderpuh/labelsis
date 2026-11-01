@@ -45,3 +45,7 @@ refs/
 # them; the originals are kept locally for re-extract / version bumps
 # but not redistributed.
 external/
+
+# PlatformIO / ESP-IDF generated files
+/build-log.txt
+/sdkconfig.ql700
