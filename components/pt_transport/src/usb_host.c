@@ -30,6 +30,7 @@ static const char *TAG = "pt_usb";
 
 #define PT_VID 0x04F9
 static const uint16_t PT_PIDS[] = {
+    0x2042,  /* Brother QL-700: USB printer mode */
     0x205E,  /* PT-H500 */
     0x205F,  /* PT-E500 */
     0x2061,  /* PT-P700 */
@@ -57,6 +58,7 @@ static const uint16_t PT_PIDS[] = {
  * post-mortem and what would unblock this (a USB packet capture of
  * Brother's BrEsSwitchELtoETempW running against a real device). */
 static const uint16_t PT_PIDS_PLITE[] = {
+    0x2049,  /* Brother QL-700: Editor Lite mass-storage mode */
     0x2064,  /* PT-P700 in P-Lite mode */
     0x2065,  /* PT-P750W in P-Lite mode */
 };
@@ -79,6 +81,7 @@ struct pt_transport_usb_host {
 
     usb_device_handle_t      dev_hdl;
     uint8_t                  dev_addr;
+    uint16_t                 product_id; /* identify PT vs QL */
     uint8_t                  intf_num;
     uint8_t                  ep_in_addr;
     uint8_t                  ep_out_addr;
@@ -482,6 +485,11 @@ pt_transport_usb_host_t *pt_transport_usb_host_open(uint32_t connect_timeout_ms)
 
     u->dev_hdl     = dev;
     u->dev_addr    = addr;
+    const usb_device_desc_t *attached_desc = NULL;
+    if (usb_host_get_device_descriptor(dev, &attached_desc) == ESP_OK
+        && attached_desc != NULL) {
+        u->product_id = attached_desc->idProduct;
+    }
     u->device_open = true;
 
     if (pick_endpoints(u) != 0) {
@@ -515,6 +523,11 @@ pt_transport_t pt_transport_usb_host_transport(pt_transport_usb_host_t *u)
 bool pt_transport_usb_host_plite_seen(void)
 {
     return s_plite_seen;
+}
+
+bool pt_transport_usb_host_is_ql700(const pt_transport_usb_host_t *u)
+{
+    return u && u->device_open && u->product_id == 0x2042;
 }
 
 bool pt_transport_usb_host_alive(const pt_transport_usb_host_t *u)

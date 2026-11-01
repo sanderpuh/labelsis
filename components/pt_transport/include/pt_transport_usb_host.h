@@ -53,6 +53,8 @@ bool pt_transport_usb_host_plite_seen(void);
  * the device is still alive -- they should use this to gate
  * "transport is ready" checks. */
 bool pt_transport_usb_host_alive(const pt_transport_usb_host_t *u);
+/* True for a connected QL-700 in normal printer mode. */
+bool pt_transport_usb_host_is_ql700(const pt_transport_usb_host_t *u);
 
 #ifdef __cplusplus
 }

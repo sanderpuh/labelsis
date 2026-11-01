@@ -585,6 +585,10 @@ static pt_transport_t            s_transport;
 static pt_transport_mock_t       s_mock;
 static pt_transport_usb_host_t  *s_usb;
 static const char               *s_transport_name = "waiting";
+static bool ql700_connected(void)
+{
+    return s_usb && pt_transport_usb_host_is_ql700(s_usb);
+}
 
 /* Forward decl: api_status reports the OTA gate state alongside
  * transport so the SPA's existing status poll can surface the OTA
@@ -791,6 +795,11 @@ static esp_err_t api_status(httpd_req_t *req)
      * two openers (P-Lite mode, BOOT-button override); see
      * ota_gate_open. */
     const char *ota_av = ota_gate_open() ? "true" : "false";
+    if (ql700_connected()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"transport\":\"usb_host\",\"printer\":\"QL-700\",\"usb_detected\":true,\"error\":\"ql700_protocol_pending\"}");
+    }
     if (!transport_ready()) {
         char body[160];
         int n = snprintf(body, sizeof body,
@@ -867,6 +876,11 @@ static esp_err_t api_info(httpd_req_t *req)
 {
     cors_headers(req);
     httpd_resp_set_type(req, "application/json");
+    if (ql700_connected()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"printer\":\"QL-700\",\"usb_detected\":true,\"error\":\"ql700_protocol_pending\"}");
+    }
     /* Same short-circuit as api_status: nothing to query when there's
      * no live transport. The SPA falls back to its built-in geometry
      * defaults so label design keeps working. */
@@ -958,6 +972,11 @@ static esp_err_t feed_or_cut(httpd_req_t *req, bool do_cut, uint16_t dots)
 {
     cors_headers(req);
     httpd_resp_set_type(req, "application/json");
+    if (ql700_connected()) {
+        httpd_resp_set_status(req, "501 Not Implemented");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"ql700_print_not_implemented\"}");
+    }
     /* No printer attached -- nothing to feed or cut. Refuse cleanly so
      * the SPA's button can show the failure. */
     if (!transport_ready()) {
@@ -1038,6 +1057,11 @@ static esp_err_t api_print(httpd_req_t *req)
 {
     cors_headers(req);
     httpd_resp_set_type(req, "application/json");
+    if (ql700_connected()) {
+        httpd_resp_set_status(req, "501 Not Implemented");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"ql700_print_not_implemented\"}");
+    }
     /* Refuse with a clean error rather than reading the (potentially
      * large) body just to drop it. The SPA can show "no printer
      * attached" inline; once the user plugs in, the next print call
