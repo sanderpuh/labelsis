@@ -458,12 +458,12 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         </select>
         <span class="spacer"></span>
         <span class="more-row inline-actions">
-          <button id="lib-save"   class="secondary" type="button" data-i18n="lib.btn.save">save as…</button>
+          <button id="lib-save"   class="secondary" type="button" data-i18n="lib.btn.save">save as</button>
           <button id="lib-update" class="secondary" type="button" disabled data-i18n="lib.btn.update">update</button>
           <button id="lib-delete" class="secondary" type="button" disabled data-i18n="lib.btn.delete">delete</button>
           <button id="lib-clear"  class="secondary" type="button" data-i18n="lib.btn.new">new</button>
-          <button id="lib-download" class="secondary" type="button" data-i18n="lib.btn.download" title="save this design as a file">download</button>
-          <button id="lib-open" class="secondary" type="button" data-i18n="lib.btn.open" title="open a design file">open file…</button>
+          <button id="lib-export" class="secondary" type="button" data-i18n="lib.btn.export" data-i18n-attr="title:lib.btn.export.title" title="export this design as a JSON file">export</button>
+          <button id="lib-import" class="secondary" type="button" data-i18n="lib.btn.import" data-i18n-attr="title:lib.btn.import.title" title="import a design from a JSON file">import</button>
           <input id="lib-file" type="file" accept=".json,application/json" hidden>
         </span>
       </div>
@@ -778,7 +778,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <span class="muted" id="tpl-rowinfo">-</span>
         <button id="tpl-next" class="secondary" type="button">next</button>
         <span class="spacer"></span>
-        <button id="csv-import" class="secondary" type="button">import…</button>
+        <button id="csv-import" class="secondary" type="button">CSV Import</button>
         <button id="csv-export" class="secondary" type="button">export</button>
         <button id="csv-clear"  class="secondary" type="button">clear</button>
         <input id="csv-file" type="file" accept=".csv,.tsv,text/csv,text/plain,text/tab-separated-values" hidden>
@@ -915,8 +915,10 @@ const STRINGS = {
     "panel.ota":               "Firmware update",
     "ota.help":                "OTA gate is open (printer in Editor Lite mode, or BOOT button toggled). Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.",
     "btn.ota.upload":          "install",
-    "lib.btn.download":        "download",
-    "lib.btn.open":            "open file…",
+    "lib.btn.export":          "export",
+    "lib.btn.export.title":     "export this design as a JSON file",
+    "lib.btn.import":          "import",
+    "lib.btn.import.title":     "import a design from a JSON file",
     /* about.intro is rendered AFTER the project link in the markup
      * (the link sits outside the data-i18n span so applyI18n's
      * textContent assignment can't wipe its <a> tag). The i18n
@@ -974,7 +976,7 @@ const STRINGS = {
     "field.fill.dense_dots":   "dense dots ⠿",
     "field.fill.none":         "outline only",
     "lib.option.placeholder":  "- load saved label -",
-    "lib.btn.save":            "save as…",
+    "lib.btn.save":            "save as",
     "lib.btn.update":          "update",
     "lib.btn.delete":          "delete",
     "lib.btn.new":             "new",
@@ -3622,8 +3624,8 @@ function designFilename(name) {
   return `${base}.json`;
 }
 
-function downloadDesign() {
-  if (!elements.length) { log("nothing to download - the design is empty"); return; }
+function exportDesign() {
+  if (!elements.length) { log("nothing to export - the design is empty"); return; }
   const doc  = designDoc();
   const text = JSON.stringify(doc, null, 2);
   const a = document.createElement("a");
@@ -3632,7 +3634,7 @@ function downloadDesign() {
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 0);
-  log(`downloaded ${a.download}`, true);
+  log(`exported ${a.download}`, true);
 }
 
 /* Scale a parsed element from its authored dpi to the current one.
@@ -3708,17 +3710,17 @@ function applyDesignDoc(doc, filename) {
 
   const notes = [];
   if (ratio !== 1) notes.push(`rescaled from ${dpi} dpi`);
-  log(`opened ${filename}${notes.length ? " (" + notes.join(", ") + ")" : ""}`, true);
+  log(`imported ${filename}${notes.length ? " (" + notes.join(", ") + ")" : ""}`, true);
   return null;
 }
 
-document.getElementById("lib-download").addEventListener("click", downloadDesign);
-document.getElementById("lib-open").addEventListener("click", () => {
+document.getElementById("lib-export").addEventListener("click", exportDesign);
+document.getElementById("lib-import").addEventListener("click", () => {
   document.getElementById("lib-file").click();
 });
 document.getElementById("lib-file").addEventListener("change", async e => {
   const f = e.target.files && e.target.files[0];
-  e.target.value = "";           /* allow reopening the same file */
+  e.target.value = "";           /* allow re-importing the same file */
   if (!f) return;
   let doc;
   try {
@@ -3728,7 +3730,7 @@ document.getElementById("lib-file").addEventListener("change", async e => {
     return;
   }
   const err = applyDesignDoc(doc, f.name);
-  if (err) log(`could not open ${f.name}: ${err}`, false);
+  if (err) log(`could not import ${f.name}: ${err}`, false);
 });
 
 /* duplicate selected */

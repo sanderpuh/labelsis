@@ -1,0 +1,89 @@
+ CMakeLists.txt                                     |  74 [32m+[m[31m--[m
+ README.md                                          | 129 [32m+[m[31m---[m
+ boards/README.md                                   |  63 [31m--[m
+ boards/devkitc_s3/partitions.csv                   |   2 [32m+[m[31m-[m
+ boards/devkitc_s3/sdkconfig.defaults               |   2 [32m+[m[31m-[m
+ boards/lolin_s2_mini/board.h                       |  12 [31m-[m
+ boards/lolin_s2_mini/partitions.csv                |  11 [31m-[m
+ boards/lolin_s2_mini/sdkconfig.defaults            |  13 [31m-[m
+ boards/lolin_s2_mini/target                        |   1 [31m-[m
+ components/pt_app/CMakeLists.txt                   |   5 [32m+[m[31m-[m
+ components/pt_app/idf_component.yml                |   2 [32m+[m[31m-[m
+ components/pt_app/include/pt_app.h                 |  13 [32m+[m[31m-[m
+ components/pt_app/include/pt_led.h                 |   2 [32m+[m[31m-[m
+ components/pt_app/spa/i18n/de.json                 |  12 [32m+[m[31m-[m
+ components/pt_app/spa/index.html                   | 458 [32m+++[m[31m-----------[m
+ components/pt_app/src/pt_app.c                     | 663 [32m+++[m[31m------------------[m
+ components/pt_protocol/CMakeLists.txt              |   6 [31m-[m
+ components/pt_protocol/include/pt_protocol.h       | 248 [31m--------[m
+ components/pt_protocol/src/pt_protocol.c           | 357 [31m-----------[m
+ components/pt_protocol/srcs.cmake                  |  11 [31m-[m
+ components/pt_session/CMakeLists.txt               |   7 [31m-[m
+ components/pt_session/include/pt_session.h         |  86 [31m---[m
+ components/pt_session/src/pt_session.c             | 266 [31m---------[m
+ components/pt_session/srcs.cmake                   |   6 [31m-[m
+ components/pt_transport/CMakeLists.txt             |  13 [32m+[m[31m-[m
+ components/pt_transport/include/pt_transport.h     |  11 [32m+[m[31m-[m
+ .../pt_transport/include/pt_transport_libusb.h     |  44 [31m--[m
+ .../pt_transport/include/pt_transport_mock.h       |  93 [31m---[m
+ .../pt_transport/include/pt_transport_usb_host.h   |  33 [32m+[m[31m-[m
+ components/pt_transport/src/libusb.c               | 168 [31m------[m
+ components/pt_transport/src/mock.c                 | 203 [31m-------[m
+ components/pt_transport/src/usb_host.c             | 146 [32m++[m[31m---[m
+ components/pt_transport/srcs.cmake                 |   6 [31m-[m
+ components/ql700_protocol/CMakeLists.txt           |   6 [32m+[m
+ .../include/ql700_raster.h                         |   0
+ .../include/ql700_status.h                         |   0
+ .../src/ql700_raster.c                             |   0
+ .../src/ql700_status.c                             |   0
+ doc/DEVELOPMENT.md                                 | 140 [32m+[m[31m----[m
+ doc/HARDWARE.md                                    |  50 [32m+[m[31m-[m
+ doc/INSTALL.md                                     | 112 [32m+[m[31m---[m
+ doc/OTA.md                                         |  24 [32m+[m[31m-[m
+ doc/RESEARCH-PLITE.md                              | 244 [31m--------[m
+ doc/TROUBLESHOOTING.md                             |  29 [32m+[m[31m-[m
+ doc/USAGE.md                                       |  22 [32m+[m[31m-[m
+ host/CMakeLists.txt                                |  56 [32m+[m[31m-[m
+ host/lib/fixture.c                                 |  35 [31m--[m
+ host/lib/fixture.h                                 |  22 [31m-[m
+ host/tests/CMakeLists.txt                          |  62 [32m+[m[31m-[m
+ host/tests/smoke_libusb.c                          |  48 [31m--[m
+ host/tests/test_bitmap.c                           | 112 [31m----[m
+ host/tests/test_encoder.c                          | 227 [31m-------[m
+ host/tests/test_encoder_vs_oracle.c                | 160 [31m-----[m
+ host/tests/test_mock_transport.c                   | 165 [31m-----[m
+ host/tests/test_oracle_fixtures.c                  |  66 [31m--[m
+ host/tests/test_packbits.c                         | 107 [31m----[m
+ host/tests/test_placeholder.c                      |   8 [31m-[m
+ host/tests/test_session.c                          | 155 [31m-----[m
+ host/tests/test_status_decode.c                    | 125 [31m----[m
+ main/CMakeLists.txt                                |   3 [31m-[m
+ main/main.c                                        |  14 [32m+[m[31m-[m
+ platformio.ini                                     |   2 [31m-[m
+ scripts/build-release.sh                           | 208 [31m-------[m
+ scripts/ci.sh                                      |  26 [32m+[m[31m-[m
+ scripts/host-test.sh                               |  22 [32m+[m[31m-[m
+ scripts/idf-env.sh                                 |   7 [31m-[m
+ scripts/labelsis-ota.py                            |   6 [32m+[m[31m-[m
+ scripts/mock-server.py                             | 184 [32m++[m[31m----[m
+ scripts/parse_ptd.py                               | 367 [31m------------[m
+ sdkconfig.defaults                                 |  12 [32m+[m[31m-[m
+ test/fixtures/calibrate_12mm_tape_12mm.bin         | Bin [31m1200[m -> [32m0[m bytes
+ test/fixtures/calibrate_12mm_tape_12mm.json        |   7 [31m-[m
+ test/fixtures/calibrate_12mm_tape_12mm_raw.bin     | Bin [31m1978[m -> [32m0[m bytes
+ test/fixtures/calibrate_12mm_tape_12mm_raw.json    |   7 [31m-[m
+ test/fixtures/gunda_18mm_18mm.bin                  | Bin [31m4828[m -> [32m0[m bytes
+ test/fixtures/gunda_18mm_18mm.json                 |   7 [31m-[m
+ test/fixtures/l_24mm_long.bin                      | Bin [31m4028[m -> [32m0[m bytes
+ test/fixtures/l_24mm_long.json                     |   7 [31m-[m
+ test/fixtures/tux-128px-bw_24mm.bin                | Bin [31m1741[m -> [32m0[m bytes
+ test/fixtures/tux-128px-bw_24mm.json               |   7 [31m-[m
+ test/fixtures/tux-128px-bw_24mm_raw.bin            | Bin [31m2206[m -> [32m0[m bytes
+ test/fixtures/tux-128px-bw_24mm_raw.json           |   7 [31m-[m
+ tools/cli/CMakeLists.txt                           |   2 [31m-[m
+ tools/cli/pt_send.c                                | 420 [31m-------------[m
+ tools/oracle/CMakeLists.txt                        |   8 [31m-[m
+ tools/oracle/README.md                             |  42 [31m--[m
+ tools/oracle/capture-fixtures.sh                   |  57 [31m--[m
+ tools/oracle/ptouch-770-capture.c                  | 294 [31m---------[m
+ 88 files changed, 464 insertions(+), 6393 deletions(-)
