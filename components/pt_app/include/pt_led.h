@@ -40,7 +40,7 @@ typedef enum {
     PT_LED_STA_CONNECTING,
     PT_LED_AP_ONBOARDING,
     PT_LED_READY,           /* Wi-Fi up + printer attached */
-    PT_LED_USB_WAITING,     /* Wi-Fi up but no PT-* on USB */
+    PT_LED_USB_WAITING,     /* Wi-Fi up but no QL-700 on USB */
     PT_LED_PRINTING,        /* transient, restored by caller after job */
     PT_LED_ERROR,           /* unrecoverable -- not auto-set today */
 } pt_led_state_t;

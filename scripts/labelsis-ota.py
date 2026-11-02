@@ -5,7 +5,7 @@ labelsis-ota.py -- upload a firmware image to a LabelSis device over HTTP.
 Mirrors what the SPA's "Firmware update" panel does (POST /api/ota), but
 from a terminal -- handy for headless flashing, scripted rollouts, or
 when the SPA can't reach the device because of a browser quirk (see
-pt700-cbb HAR analysis: socket starvation under aggressive polling).
+an earlier Wi-Fi capture: socket starvation under aggressive polling).
 
 Stdlib-only (no `requests` dep).
 
@@ -17,7 +17,7 @@ Exit codes:
     0 -- upload OK, device rebooted into the new image (running_slot
          flipped, confirmed via post-reboot poll)
     1 -- argument / file error
-    2 -- OTA gate closed (slide printer to P-Lite, or hold BOOT 2-30 s
+    2 -- OTA gate closed (slide printer to Editor Lite, or hold BOOT 2-30 s
          and release while device is online)
     3 -- HTTP error from /api/ota (image_validate, wrong_project, ...)
     4 -- network / socket error during upload, or device didn't come
@@ -61,7 +61,7 @@ def upload(host: str, port: int, path: Path, timeout: float, chunk: int) -> int:
         pre.close()
     if not st.get("available"):
         print(f"error: OTA gate closed: {st.get('reason', '?')}", file=sys.stderr)
-        print("  - slide the printer's switch to EL (P-Lite mode), OR", file=sys.stderr)
+        print("  - slide the printer's switch to EL (Editor Lite mode), OR", file=sys.stderr)
         print("  - hold the BOOT button 2-30 s and release", file=sys.stderr)
         return 2
     print(f"gate:   open ({st.get('reason', '?')})")

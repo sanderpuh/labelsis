@@ -1,16 +1,8 @@
-# Truly target-agnostic defaults. Per-board overlays in
-# boards/<name>/sdkconfig.defaults set flash size, partition table,
-# PSRAM, and Bluetooth toggles. Switch boards via:
-#     idf.py -D BOARD=<name> set-target <s2|s3>
+# Shared LabelSis firmware defaults for the PlatformIO ESP32-S3 target.
 
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 
-# OTA -- bootloader rollback. After OTA, the new image boots in
-# PENDING_VERIFY state; the firmware must call
-# esp_ota_mark_app_valid_cancel_rollback() once it has reached a
-# known-good state (Wi-Fi up + HTTP serving). If it crashes or
-# reboots before that confirmation, the bootloader rolls back to the
-# previous slot. CHECK_APP_HASH adds a SHA256 verify on each boot.
+# OTA rollback: confirm an update only after Wi-Fi and HTTP are healthy.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_BOOTLOADER_WDT_ENABLE=y

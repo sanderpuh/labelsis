@@ -2,15 +2,10 @@
 #define PT_TRANSPORT_H
 
 /*
- * pt_transport - abstract bidirectional byte channel to a PT-* printer.
+ * pt_transport - abstract bidirectional byte channel to the QL-700 printer.
  *
- * Higher layers (pt_session, future BLE bridge, the firmware's web app)
- * call pt_transport_send/recv. Concrete implementations plug in a
- * pt_transport_t with their own send/recv function pointers + ctx.
- *
- * Implementations:
- *   - mock     (Phase 3, both host & target) - virtual printer state machine
- *   - usb_host (Phase 3, esp32-s3 only)      - bulk endpoints on VID 0x04F9
+ * The QL-700 protocol layer uses this small byte-channel abstraction.
+ * The firmware currently provides one implementation: ESP32-S3 USB Host.
  */
 
 #include <stddef.h>

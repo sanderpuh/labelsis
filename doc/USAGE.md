@@ -41,24 +41,8 @@ Click *Print all* to run the design once per CSV row. Designs that
 expand to >10 labels prompt for confirmation; the hard cap is 1000 to
 prevent runaways.
 
-## P-Lite mode
+## Editor Lite mode
 
-Some PT-* models have a side slider with two positions:
+The QL-700 has a physical Editor Lite switch. In normal printer mode it exposes the USB printer interface used by LabelSis. In **Editor Lite (EL)** mode it exposes mass storage instead, so LabelSis cannot print. The SPA indicates Editor Lite mode when it detects USB ID `04F9:2049`. Switch back to normal printer mode; the ESP32-S3 USB host monitor will detect the QL-700 again automatically.
 
-- **E** (normal Edit mode) -- exposes a USB printer-class interface;
-  this is what the firmware drives.
-- **EL** (Editor Lite / P-Lite) -- re-enumerates as USB Mass Storage
-  hosting Brother's Windows-only "Editor Lite" tool. The firmware
-  **cannot drive prints** in this mode.
-
-If the slider is in EL position, the SPA shows a message:
-`transport: P-Lite mode -- slide switch to E or hold the PLite
-button 2 s`. Physically slide the switch or hold the printer's
-PLite button for ~2 s to flip back; the ESP32's transport monitor
-re-pairs the printer automatically within a few seconds.
-
-Driving the printer out of P-Lite over USB alone is on the backlog
-(`pt700-wmf`, P4). Three implementation attempts have been reverted
-so far -- see [doc/RESEARCH-PLITE.md](RESEARCH-PLITE.md) for the
-post-mortem and what would unblock it (a USB packet capture of
-Brother's own tool flipping a real PT-P700).
+The Editor Lite state also opens the physical-presence gate for OTA updates. See [OTA.md](OTA.md).

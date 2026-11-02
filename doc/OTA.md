@@ -8,15 +8,14 @@ so the OTA endpoint can't accept "anyone with network reach".
 LabelSis has two physical-state-proves-intent gates that open the
 OTA endpoint. Either one is enough; both close on reboot.
 
-1. **Printer in P-Lite mode** -- slider in EL position. The default
+1. **QL-700 in Editor Lite mode** -- slider in EL position. The default
    path on a deployed device. The window naturally coincides with
    "printer cannot print", so it doubles as a maintenance moment.
 2. **BOOT button override** -- hold the device's BOOT button for
    2-30 seconds and release. The OTA gate toggles open. The button
    only acts after the device is online (Wi-Fi STA up + HTTP serving)
    so a tap during boot can't pre-arm the gate. Useful on a dev
-   board with no printer connected, or on a model whose printer has
-   no P-Lite slider (handhelds). Hold the same button past 30 s
+   board with no printer connected, or whenever Editor Lite mode is unavailable. Hold the same button past 30 s
    without releasing and you get the Wi-Fi-reset gesture instead
    (creds wiped + reboot, regardless of online state).
 
@@ -27,12 +26,11 @@ Status view.
 
 1. Build the new firmware on your dev box:
    ```sh
-   idf.py -D BOARD=<your-board> set-target <s2|s3>
-   idf.py build
+   pio run -e ql700
    ```
-   The image lands at `build/labelsis.bin`.
+   The PlatformIO image is written under `.pio/build/ql700/` (typically `firmware.bin`).
 
-2. Slide the printer's switch from **E** to **EL**. The Status view
+2. Switch the QL-700 to **Editor Lite** mode (EL). The Status view
    lights up a "Firmware update" panel.
 
 3. Pick the `labelsis.bin` file and click **install**. The panel
@@ -45,7 +43,7 @@ Status view.
    like success). The SPA reloads automatically once the new
    image is live.
 
-4. Slide the switch back to **E** so printing resumes.
+4. Switch the QL-700 back to normal printer mode so printing resumes.
 
 ## CLI alternative
 
@@ -66,7 +64,7 @@ for full options.
 ## What the device does
 
 - Streams the request body straight into the inactive OTA slot.
-- Re-checks the gate on each chunk -- if you slide back to E
+- Re-checks the gate on each chunk -- if you switch back to normal printer mode
   mid-upload, the partial write is aborted and never made the boot
   target. Sliding forward + back is safe.
 - Verifies SHA256 (built into the image header) when the upload
@@ -95,8 +93,8 @@ flash / OTA failure mode:
 
 | Result | Meaning |
 |---|---|
-| `403 gate_closed` | Neither gate is open at upload start. Slide to EL, or hold BOOT 2-30 s + release (device must be online). |
-| `403 gate_closed_mid_upload` | The gate that was open dropped while the upload was in flight (slider back to E, or BOOT toggled off). Half-written image discarded; retry. |
+| `403 gate_closed` | Neither gate is open at upload start. Switch to Editor Lite mode, or hold BOOT 2-30 s + release (device must be online). |
+| `403 gate_closed_mid_upload` | The gate that was open dropped while the upload was in flight (switch back to normal printer mode, or BOOT toggled off). Half-written image discarded; retry. |
 | `400 image_validate` | SHA256 from the image header didn't match the bytes received -- truncated upload, network corruption, or a non-IDF binary. |
 | `400 wrong_project` | Image is structurally valid but its `project_name` is not "labelsis". Image is on disk but never set as boot target; next OTA overwrites it. |
 | `500 ota_begin` | The OTA partition is in a bad state and the firmware's auto-erase-and-retry didn't recover it. Check the `esp_err` field for the underlying cause. Try `POST /api/reboot` (see below) and retry. |
@@ -142,13 +140,11 @@ to USB, escalate in this order:
    device. Last-resort recovery; equivalent to /api/reboot but works
    when the device isn't responding to HTTP at all.
 
-6. **USB re-flash via `idf.py flash`**. Use when nothing else works
+6. **USB re-flash via PlatformIO (`pio run -e ql700 -t upload`)**. Use when nothing else works
    or you need to install a firmware version that doesn't have the
    recovery endpoints yet.
 
 ## Recovery
-
-If the new image somehow boots far enough to confirm itself as valid
 
 If the new image somehow boots far enough to confirm itself as valid
 but is then unusable (e.g., wrong board profile), Wi-Fi reset (BOOT

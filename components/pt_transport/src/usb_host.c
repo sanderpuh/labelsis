@@ -2,8 +2,7 @@
  * pt_transport_usb_host -- esp-idf USB Host backend for pt_transport_t.
  * See pt_transport_usb_host.h for the API.
  *
- * Target-only -- the host CMake build does not list this file. Compiles
- * for both ESP32-S2 and ESP32-S3 (identical USB-OTG controller).
+ * Target-only; the PlatformIO ESP32-S3 firmware build compiles this file.
  *
  * Lifecycle: usb_host_install + the lib/client tasks are one-shot
  * singletons. The first call to pt_transport_usb_host_open() brings
@@ -28,50 +27,17 @@
 
 static const char *TAG = "pt_usb";
 
-#define PT_VID 0x04F9
-static const uint16_t PT_PIDS[] = {
-    0x2042,  /* Brother QL-700: USB printer mode */
-    0x205E,  /* PT-H500 */
-    0x205F,  /* PT-E500 */
-    0x2061,  /* PT-P700 */
-    0x2062,  /* PT-P750W (Wi-Fi sibling of P700; identical USB protocol
-              * when wired -- the on-printer Wi-Fi is independent of the
-              * print path). Confirmed by ptouch-esp32 PID table flags
-              * (FLAG_RASTER_PACKBITS|FLAG_P700_INIT, same as P700). */
-};
+#define BROTHER_VID 0x04F9
+#define QL700_PID 0x2042
+#define QL700_EDITOR_LITE_PID 0x2049
 
-/* Same VID, different firmware mode: when the side slider is in P-Lite
- * position the PT-* enumerates as USB Mass Storage (a virtual disk
- * containing Brother's "P-touch Editor Lite") with one of these PIDs
- * and exposes no printer-class interface. We can't drive prints in
- * that state today; flagging it lets the SPA show the user a useful
- * "slide to E or hold the PLite button" hint instead of generic
- * "unavailable".
- *
- * Programmatic auto-unstick was attempted three times (commits
- * 85a015b, 86fab68, d27ff27) and reverted each time -- our writes
- * reach the printer's PTLITE.PRN file but the firmware doesn't act
- * on them. The MSC handler that processes those writes lives in a
- * separate firmware partition not present in any of the firmware
- * blobs we have, so we cannot reverse-engineer the trigger from
- * static analysis alone. See doc/RESEARCH-PLITE.md for the full
- * post-mortem and what would unblock this (a USB packet capture of
- * Brother's BrEsSwitchELtoETempW running against a real device). */
-static const uint16_t PT_PIDS_PLITE[] = {
-    0x2049,  /* Brother QL-700: Editor Lite mass-storage mode */
-    0x2064,  /* PT-P700 in P-Lite mode */
-    0x2065,  /* PT-P750W in P-Lite mode */
-};
+/* The QL-700 exposes a printer-class interface in normal mode and a
+ * mass-storage device when Editor Lite mode is active. Only these two
+ * product IDs belong to the supported printer. */
+static volatile bool s_editor_lite_seen;
+static usb_device_handle_t s_editor_lite_dev;
 
-/* Sticky flag set by on_client_event when a P-Lite-mode PT-* shows up.
- * The pt_app retry loop reads this between open() attempts to decide
- * whether to surface a P-Lite-specific message instead of the generic
- * "no printer attached". */
-static volatile bool s_plite_seen;
-
-/* Bulk transfers: PT-* MPS is 64 bytes per the SDM. We allocate 1 KB
- * per direction so a status read can request 64 (one MPS) and an OUT
- * write can fit a multi-row chunk. */
+/* Bulk transfers: allocate 1 KB per direction for status and raster data. */
 #define USB_BUF_SIZE 1024
 
 struct pt_transport_usb_host {
@@ -81,7 +47,6 @@ struct pt_transport_usb_host {
 
     usb_device_handle_t      dev_hdl;
     uint8_t                  dev_addr;
-    uint16_t                 product_id; /* identify PT vs QL */
     uint8_t                  intf_num;
     uint8_t                  ep_in_addr;
     uint8_t                  ep_out_addr;
@@ -102,7 +67,7 @@ static TaskHandle_t             s_lib_task;
 static TaskHandle_t             s_client_task;
 
 /* Filtering pipeline between the client event handler (producer) and
- * pt_transport_usb_host_open() (consumer). When a PT-* shows up, the
+ * pt_transport_usb_host_open() (consumer). When a QL-700 shows up, the
  * handler opens the device, validates VID/PID, stores the handle in
  * s_pending_dev, and releases s_pending_sem. The consumer takes the
  * semaphore + claims the handle. s_pending_lock guards both fields. */
@@ -213,38 +178,25 @@ static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
             return;
         }
 
-        bool match = (desc->idVendor == PT_VID);
-        if (match) {
-            match = false;
-            for (size_t i = 0; i < sizeof PT_PIDS / sizeof PT_PIDS[0]; i++)
-                if (desc->idProduct == PT_PIDS[i]) { match = true; break; }
-        }
+        const bool is_ql700 = desc->idVendor == BROTHER_VID &&
+                              desc->idProduct == QL700_PID;
+        const bool is_editor_lite = desc->idVendor == BROTHER_VID &&
+                                    desc->idProduct == QL700_EDITOR_LITE_PID;
 
-        if (!match) {
-            /* Same vendor, P-Lite mode? Flag for the app layer so the
-             * SPA can render a specific hint instead of generic
-             * "unavailable". Three auto-unstick attempts (commits
-             * 85a015b, 86fab68, d27ff27) all reverted -- bytes reach
-             * the printer's PTLITE.PRN at the right offset but the
-             * firmware doesn't act on them, and the MSC handler that
-             * processes those writes lives in a firmware partition we
-             * don't have. See doc/RESEARCH-PLITE.md. */
-            if (desc->idVendor == PT_VID) {
-                for (size_t i = 0; i < sizeof PT_PIDS_PLITE / sizeof PT_PIDS_PLITE[0]; i++) {
-                    if (desc->idProduct == PT_PIDS_PLITE[i]) {
-                        ESP_LOGW(TAG, "PT-* in P-Lite mode (pid=%04x) -- "
-                                      "slide to E or hold PLite button 2s",
-                                 desc->idProduct);
-                        s_plite_seen = true;
-                        break;
-                    }
-                }
+        if (!is_ql700) {
+            if (is_editor_lite) {
+                ESP_LOGW(TAG, "QL-700 is in Editor Lite mode (pid=%04x)",
+                         desc->idProduct);
+                s_editor_lite_dev = dev;
+                s_editor_lite_seen = true;
+                return; /* Keep the handle until DEV_GONE clears the state. */
             }
             usb_host_device_close(s_client_hdl, dev);
             return;
         }
+        s_editor_lite_seen = false;
 
-        /* PT-* found. Hand it to whoever's currently waiting in
+        /* QL-700 found. Hand it to whoever's currently waiting in
          * pt_transport_usb_host_open. The lock guards against two
          * NEW_DEV events racing (rare but possible if a hub bursts
          * connect events). */
@@ -259,20 +211,16 @@ static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
             s_pending_addr = msg->new_dev.address;
             xSemaphoreGive(s_pending_lock);
             xSemaphoreGive(s_pending_sem);
-            ESP_LOGI(TAG, "PT-* enumerated: vid=%04x pid=%04x addr=%u",
+            ESP_LOGI(TAG, "QL-700 enumerated: vid=%04x pid=%04x addr=%u",
                      desc->idVendor, desc->idProduct, msg->new_dev.address);
         } else {
             usb_host_device_close(s_client_hdl, dev);
         }
     } else if (msg->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
-        /* Device disconnected. Two cases:
-         *  - It was the active session's device: mark the session
-         *    closed so subsequent send/recv fails fast and the SPA's
-         *    next status poll sees transport=waiting; pt_app's retry
-         *    task picks up the next attach.
-         *  - It was a pending (filtered but not yet claimed) device:
-         *    drop our stored handle so the next open() doesn't try
-         *    to claim a dead device. */
+        /* Device disconnected. Release whichever state belonged to it:
+         *  - active QL-700 printer transport;
+         *  - retained Editor Lite handle (so retries keep its state);
+         *  - pending QL-700 handle not yet claimed by open(). */
         struct pt_transport_usb_host *u = s_active;
         if (u && u->dev_hdl == msg->dev_gone.dev_hdl) {
             if (u->interface_claimed) {
@@ -282,7 +230,13 @@ static void on_client_event(const usb_host_client_event_msg_t *msg, void *arg)
             usb_host_device_close(s_client_hdl, u->dev_hdl);
             u->dev_hdl     = NULL;
             u->device_open = false;
-            ESP_LOGW(TAG, "PT-* disconnected");
+            ESP_LOGW(TAG, "QL-700 disconnected");
+        }
+        if (s_editor_lite_dev == msg->dev_gone.dev_hdl) {
+            usb_host_device_close(s_client_hdl, s_editor_lite_dev);
+            s_editor_lite_dev = NULL;
+            s_editor_lite_seen = false;
+            ESP_LOGI(TAG, "QL-700 left Editor Lite mode / disconnected");
         }
         if (xSemaphoreTake(s_pending_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
             if (s_pending_dev == msg->dev_gone.dev_hdl) {
@@ -335,13 +289,13 @@ static esp_err_t host_init_once(void)
         return ESP_FAIL;
     }
 
-    if (xTaskCreate(client_task, "pt_usb_cli", 4096, NULL, 5, &s_client_task) != pdPASS) {
+    if (xTaskCreate(client_task, "ql700_usb_cli", 4096, NULL, 5, &s_client_task) != pdPASS) {
         ESP_LOGE(TAG, "client_task create failed");
         return ESP_FAIL;
     }
 
     s_host_inited = true;
-    ESP_LOGI(TAG, "USB host stack installed -- waiting for PT-* enumeration");
+    ESP_LOGI(TAG, "USB host stack installed -- waiting for Brother QL-700 enumeration");
     return ESP_OK;
 }
 
@@ -441,19 +395,17 @@ done:
 
 pt_transport_usb_host_t *pt_transport_usb_host_open(uint32_t connect_timeout_ms)
 {
-    s_plite_seen = false;
-
     if (host_init_once() != ESP_OK) return NULL;
 
     /* Block until the singleton client task hands us a matching
      * device, or the caller's timeout expires. */
     if (xSemaphoreTake(s_pending_sem, pdMS_TO_TICKS(connect_timeout_ms)) != pdTRUE) {
-        ESP_LOGW(TAG, "no PT-* attached within %u ms",
+        ESP_LOGW(TAG, "no QL-700 attached within %u ms",
                  (unsigned)connect_timeout_ms);
         return NULL;
     }
 
-    /* Consume the pending device under the lock so a racing DEV_GONE
+    /* Consume the pending QL-700 under the lock so a racing DEV_GONE
      * can't free the handle out from under us. */
     usb_device_handle_t dev = NULL;
     uint8_t             addr = 0;
@@ -485,11 +437,6 @@ pt_transport_usb_host_t *pt_transport_usb_host_open(uint32_t connect_timeout_ms)
 
     u->dev_hdl     = dev;
     u->dev_addr    = addr;
-    const usb_device_desc_t *attached_desc = NULL;
-    if (usb_host_get_device_descriptor(dev, &attached_desc) == ESP_OK
-        && attached_desc != NULL) {
-        u->product_id = attached_desc->idProduct;
-    }
     u->device_open = true;
 
     if (pick_endpoints(u) != 0) {
@@ -506,7 +453,7 @@ pt_transport_usb_host_t *pt_transport_usb_host_open(uint32_t connect_timeout_ms)
     if (usb_host_transfer_alloc(USB_BUF_SIZE, 0, &u->xfer_out) != ESP_OK) goto fail;
 
     s_active = u;
-    ESP_LOGI(TAG, "PT-* paired: addr=%u intf=%u in=0x%02x out=0x%02x",
+    ESP_LOGI(TAG, "QL-700 paired: addr=%u intf=%u in=0x%02x out=0x%02x",
              u->dev_addr, u->intf_num, u->ep_in_addr, u->ep_out_addr);
     return u;
 
@@ -520,14 +467,9 @@ pt_transport_t pt_transport_usb_host_transport(pt_transport_usb_host_t *u)
     return (pt_transport_t){ .send = usb_send, .recv = usb_recv, .ctx = u };
 }
 
-bool pt_transport_usb_host_plite_seen(void)
+bool pt_transport_usb_host_editor_lite_seen(void)
 {
-    return s_plite_seen;
-}
-
-bool pt_transport_usb_host_is_ql700(const pt_transport_usb_host_t *u)
-{
-    return u && u->device_open && u->product_id == 0x2042;
+    return s_editor_lite_seen;
 }
 
 bool pt_transport_usb_host_alive(const pt_transport_usb_host_t *u)

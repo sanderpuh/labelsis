@@ -1,6 +1,6 @@
 # ESP32-S3-DevKitC-1-N16R8 board profile.
 # 16 MB QIO flash + 8 MB octal PSRAM, WS2812 RGB on GPIO 48.
-# Pair with: idf.py -D BOARD=devkitc_s3 set-target esp32s3
+# Selected automatically by the PlatformIO ql700 environment.
 
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"

@@ -1,129 +1,48 @@
-# :label: LabelSis
+# LabelSis
 
-Network print server for the **Brother PT-P700 family** of label
-printers, running on **ESP32-S3** or **ESP32-S2** with a self-hosted web UI for
-label design.
+Network print server for the **Brother QL-700** label printer, running on an **ESP32-S3** with a self-hosted browser-based label designer.
 
 ![Screenshot of the LabelSis label designer](doc/Screenshot.png)
 
-## Why
+## What it does
 
-Brother ships P-touch Editor (Windows-only desktop) and a mobile app
-that talks Bluetooth to a select few models. There is no first-party
-way to put a USB-tethered PT-P700 on the LAN and print to it from any
-browser. **LabelSis** fills that gap: a single ESP32-S3 turns the
-printer into a stand-alone network device with no driver install, no
-app, no cloud account, no telemetry.
+Connect the ESP32-S3 DevKitC-1 to the QL-700's USB-B port, flash the firmware from PlatformIO, and use the printer over your local network at `http://labelsis.local/`. No desktop driver, cloud account, or companion app is required.
 
-## How
+- Browser-based designer for text, images, barcodes, QR codes, icons, rectangles and CSV-templated batch labels.
+- Wi-Fi captive-portal onboarding and storage for up to four wireless networks.
+- Live QL-700 status, including media detection and print readiness.
+- OTA firmware updates, gated by QL-700 Editor Lite mode or the device BOOT button.
+- Native ESP32-S3 USB host connection to the QL-700.
+- Python mock server for developing the web editor without flashing hardware.
 
-  * get an ESP32-S3 (or ESP32-S2)
-  * upload firmware
-  * connect ESP via USB to the P-touch label printer
-  * add power
-  * start designing in web ui
-  * print
+## Supported hardware and media
 
-## Highlights
+This branch supports **only the Brother QL-700** (USB VID:PID `04F9:2042`; Editor Lite mode is detected as `04F9:2049`) and the **ESP32-S3-DevKitC-1-N16R8**. Printing is currently implemented for **DK-22205, 62 mm continuous roll**. Other QL-700 media can be reported by status, but the print endpoint intentionally rejects media whose raster geometry is not implemented.
 
-- **Browser-based label designer** -- text, images, barcodes, QR
-  codes, icons, rectangles, CSV-templated batch printing. Vanilla
-  HTML/CSS/JS, no install, runs straight from device flash.
-- **Captive-portal Wi-Fi onboarding** -- phones land on the setup
-  page automatically; no need to know an IP.
-- **Multi-AP Wi-Fi list** -- up to 4 saved networks tried in
-  last-used-then-priority order on boot; AP-mode onboarding only
-  when every entry fails. Optional pre-scan skips APs not on air.
-  Designed for a portable device that travels between sites.
-- **Over-the-air firmware update** -- `POST /api/ota` from the SPA
-  Status panel or the `scripts/labelsis-ota.py` CLI. Two physical
-  gates open the endpoint (printer in P-Lite mode, or hold-and-
-  release the device's BOOT button 2-30 s). Bootloader rolls back
-  if the new image fails to confirm.
-- **Status LED** (single GPIO or WS2812 RGB) -- glance at the device,
-  don't grep serial logs.
-- **mDNS** at `labelsis.local`; falls back gracefully when blocked.
-- **Mock dev server** (Python stdlib only) -- iterate the SPA without
-  flashing or even owning the printer.
+Connect the DevKitC-1's right-hand native USB-OTG port to the printer's USB-B port. Use the left-hand UART/USB port for PlatformIO upload and serial monitoring. The printer uses its own power supply. See [Hardware](doc/HARDWARE.md).
 
-## Integrating into PT700
+## Build and upload with PlatformIO
 
-I integrated the ESP32-S2/ESP32-S3 board into my Brother P-touch PT700 label printer:
-
-![PT700 connection diagram](doc/pt700_esp32s2_connection.jpg)
-
-I used a _Wemos Lolin S2 mini ESP32-S2_ which does not come with an addition USB-serial IC on board, so the device is now "WIFI only".
-
-The PT700 microcontroller needs to detect a voltage on the VBUS pins of the USB port. 3.3V is sufficient for detection.
-
-**This is why `3.3V` is connected to `VBUS`.**
-
-## Supported printers
-
-Same protocol family per Brother's SDM v1.11. All must be in normal
-print mode (slider in **E**, not **EL** / P-Lite -- see
-[USAGE.md](doc/USAGE.md#p-lite-mode)).
-
-| Model     | VID:PID    | Notes |
-|-----------|------------|-------|
-| PT-H500   | 04F9:205E  | Handheld |
-| PT-P700   | 04F9:2061  | Reference platform; tested on hardware |
-| PT-P750W  | 04F9:2062  | P700 with on-printer Wi-Fi (irrelevant when wired) |
-| PT-E500   | 04F9:205F  | Handheld |
-
-## Quick start
+Open the repository in VSCode with the PlatformIO extension, select the `ql700` environment, and run **Build**, **Upload**, or **Monitor**. The equivalent CLI commands are:
 
 ```sh
-git clone <repo> labelsis && cd labelsis
-. ~/esp/esp-idf/export.sh
-idf.py -D BOARD=devkitc_s3 set-target esp32s3
-idf.py flash monitor
+pio run -e ql700
+pio run -e ql700 -t upload
+pio device monitor -e ql700
 ```
 
-Other boards: pass `-D BOARD=<name>` (with the matching `set-target`).
-Shipped profiles + how to add your own: [boards/README.md](boards/README.md).
+Copy `main/wifi_credentials.example.h` to `main/wifi_credentials.h` and enter your Wi-Fi credentials before building, or leave it absent and use the `labelsis-setup` onboarding network. The `ql700` PlatformIO environment uses the ESP-IDF framework provided by PlatformIO; the repository no longer maintains a separate standalone `idf.py` build workflow.
 
-Connect a phone or laptop to the **`labelsis-setup`** Wi-Fi the device
-brings up on first boot; the captive-portal page leads you through
-joining your home network. After that, visit `http://labelsis.local/`.
+See [Install](doc/INSTALL.md) for first flash instructions.
 
-Full instructions: **[doc/INSTALL.md](doc/INSTALL.md)**. Hardware
-list and cabling: **[doc/HARDWARE.md](doc/HARDWARE.md)**.
+## Development
 
-## Documentation
-
-- **[Install](doc/INSTALL.md)** -- flashing, Wi-Fi onboarding, status LED, BOOT-button reset
-- **[OTA](doc/OTA.md)** -- over-the-air updates (gated on the printer's P-Lite slider)
-- **[Usage](doc/USAGE.md)** -- using the SPA, CSV templating, P-Lite handling
-- **[Hardware](doc/HARDWARE.md)** -- devkit notes, cabling, board variants
-- **[Development](doc/DEVELOPMENT.md)** -- mock server, SPA dev tricks, CLI, host tests, architecture
-- **[Troubleshooting](doc/TROUBLESHOOTING.md)** -- first-hour symptom catalog
-- **[Third-party notices](THIRD_PARTY_NOTICES.md)** -- bundled OSS attributions
-
-## Status
-
-**Beta.** Works on a real PT-P700 over Wi-Fi for label design,
-printing, and OTA on both the **ESP32-S3-DevKitC-1** (reference) and
-the **Wemos LOLIN S2 Mini** (deployed -- this device is the one
-shown integrated into the PT700 above). PT-H500 / PT-E500 / PT-P750W
-are protocol-family matches per the Brother SDM but untested on
-hardware.
-
-## TODO
-
- * attach the ESP board neatly to the PT700 printer (currently, it is a mess of wires)
+Run native protocol tests with `./scripts/host-test.sh`; run the firmware build with `pio run -e ql700`. `python scripts/mock-server.py` serves the SPA locally with a simulated QL-700 API. See [Development](doc/DEVELOPMENT.md).
 
 ## Security
 
-The HTTP API has **no authentication**: anyone who can reach the
-device on the network can print, scan Wi-Fi, or rewrite credentials.
-This is a deliberate trade-off for a single-user appliance on a
-trusted LAN -- the same posture as a typical home printer's web
-panel. Run it on a trusted network, **do not expose port 80 to the
-public internet**, and treat the device the way you'd treat any
-other unauthenticated LAN appliance.
+The HTTP API has **no authentication**: anyone who can reach the device on the network can print, scan Wi-Fi, or rewrite credentials. Run it on a trusted network, **do not expose port 80 to the public internet**, and treat the device like any other unauthenticated LAN appliance.
 
 ## License
 
-[MIT](LICENSE). Bundled third-party components keep their own
-licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Bundled third-party components keep their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

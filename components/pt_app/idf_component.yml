@@ -1,5 +1,5 @@
 ## Managed-component dependencies for pt_app.
-## Pulled by `idf.py reconfigure` (or just `idf.py build`).
+## PlatformIO resolves these managed ESP-IDF components during firmware builds.
 
 dependencies:
   espressif/mdns: "^1.8.0"

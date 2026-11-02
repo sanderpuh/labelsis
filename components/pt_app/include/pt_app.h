@@ -2,14 +2,8 @@
 #define PT_APP_H
 
 /*
- * pt_app - MVP HTTP print-server glue for the PT-* on ESP32-S2/S3.
- * Brings up Wi-Fi STA, opens a transport (real USB host or mock),
- * starts an esp_http_server, and registers the JSON API endpoints
- * pt_session is exposed through.
- *
- * Single-call entry point from main: pt_app_run(&cfg). Phase-5 follow-up
- * issues (AP-mode onboarding, /api/print, SPA, mDNS, /api/feed,
- * /api/cut) extend this without changing the call shape.
+ * pt_app - QL-700 Wi-Fi print-server firmware for ESP32-S3.
+ * Brings up Wi-Fi, the QL-700 USB host transport and HTTP API.
  */
 
 #include <stdbool.h>
@@ -30,8 +24,7 @@ typedef struct {
     const char *wifi_ssid;
     const char *wifi_password;
     uint16_t    http_port;       /* default 80 if 0 */
-    bool        use_usb_host;    /* false → mock transport (no printer needed) */
-    uint32_t    usb_connect_timeout_ms;  /* default 10000 if 0 */
+    uint32_t    usb_connect_timeout_ms;  /* default 5000 if 0 */
     /* Active-low button (with internal pull-up) that, when held for
      * 5 s, wipes Wi-Fi creds from NVS and reboots into AP-mode
      * onboarding. Set to a negative value to disable. GPIO 0 is the

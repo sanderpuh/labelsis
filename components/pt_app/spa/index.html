@@ -400,7 +400,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
     <div class="panel">
       <div class="about-header">
         <h2 data-i18n="panel.about" style="margin:0;">About</h2>
-        <a href="https://github.com/aalarchiv/labelsis.git" target="_blank" rel="noopener"
+        <a href="https://github.com/sanderpuh/labelsis" target="_blank" rel="noopener"
            class="about-icon-link" aria-label="LabelSis homepage"
            data-i18n-attr="title:about.icon.tooltip"
            title="LabelSis -- open the project page on GitHub">
@@ -408,7 +408,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
                src="__LABELSIS_ICON_DATA_URL__">
         </a>
       </div>
-      <p class="muted"><a class="about-link" href="https://github.com/aalarchiv/labelsis.git" target="_blank" rel="noopener">LabelSis</a> <span data-i18n="about.intro">- network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.</span></p>
+      <p class="muted"><a class="about-link" href="https://github.com/sanderpuh/labelsis" target="_blank" rel="noopener">LabelSis</a> <span data-i18n="about.intro">- network print server for the Brother QL-700, running on an ESP32-S3 with a self-hosted web UI.</span></p>
       <p class="muted"><span data-i18n="about.firmware">Firmware</span>: <span id="about-fw-version">…</span></p>
       <p class="muted" data-i18n="about.licenses">Third-party components bundled with this firmware:</p>
       <dl class="about-licenses">
@@ -429,12 +429,12 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <div id="status" class="status-grid"><span class="k">…</span><span></span></div>
     </div>
     <!-- OTA panel. Hidden until /api/ota/status reports the printer in
-         P-Lite mode -- the slider's physical position is the auth gate
+         Editor Lite mode -- the slider's physical position is the auth gate
          (see doc/OTA.md). Renders a file picker, upload progress, and a
          reboot countdown. -->
     <div class="panel" id="ota-panel" hidden>
       <h2 data-i18n="panel.ota">Firmware update</h2>
-      <p class="muted" data-i18n="ota.help">OTA gate is open (printer in P-Lite mode, or BOOT button toggled). Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.</p>
+      <p class="muted" data-i18n="ota.help">OTA gate is open (printer in Editor Lite mode, or BOOT button toggled). Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.</p>
       <div class="row">
         <input id="ota-file" type="file" accept=".bin,application/octet-stream">
         <button id="ota-upload" class="secondary" type="button" disabled data-i18n="btn.ota.upload">install</button>
@@ -468,7 +468,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         </span>
       </div>
       <div class="canvas-viewport">
-        <canvas id="preview" width="600" height="128"></canvas>
+        <canvas id="preview" width="600" height="720"></canvas>
         <button id="zoom-reset" class="secondary" type="button" hidden title="reset zoom">fit</button>
       </div>
       <div class="row canvas-opts" style="margin-top:.5rem; flex-wrap:wrap; gap:.5rem .75rem;">
@@ -486,10 +486,6 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
                title="Label length in millimetres (only used when length = fixed).">
         <span class="muted" style="font-size:.85rem;">mm</span>
         <span style="flex:1; min-width:0;"></span>
-        <label data-i18n-attr="title:field.colors.help"
-               title="Render the canvas in the actual tape + ink colours from the loaded cartridge so the on-screen preview matches the print.">
-          <input id="opt-colors" type="checkbox"> <span data-i18n="field.colors">colors</span>
-        </label>
         <label data-i18n-attr="title:field.rulers.help"
                title="Show millimetre rulers on the canvas edges for layout reference. Doesn't affect the print.">
           <input id="opt-rulers" type="checkbox"> <span data-i18n="field.rulers">rulers</span>
@@ -534,28 +530,10 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="undo"      class="secondary" type="button" disabled title="Ctrl+Z" data-i18n="btn.undo">undo</button>
         <button id="redo"      class="secondary" type="button" disabled title="Ctrl+Y" data-i18n="btn.redo">redo</button>
       </div>
-      <!-- Stage 4: offline QL-700 preview, auto-detect when connected -->
+      <!-- QL-700 raster print endpoint uses fixed DK-22205 defaults. -->
       <div class="row group-start" style="margin-top:.5rem">
-        <label for="ql700-layout">Printer layout</label>
-        <select id="ql700-layout" aria-label="Printer layout (offline preview)">
-          <option value="auto">Auto (detected printer / PT fallback)</option>
-          <option value="ql700">QL-700 · DK-22205 · 62 mm continuous</option>
-        </select>
-        <span class="muted">Offline preview only; printing still requires QL-700 detection.</span>
-      </div>
-      <!-- Group: print actions -->
-      <div class="row group-start" style="margin-top:.5rem">
-        <label data-i18n-attr="title:field.auto-cut.help" title="Cut the tape after each label. Brother printers feed ~25 mm of leader tape after each cut, which gets wasted -- leave off if you're printing a single label and don't want the leader to bin.">
-          <input id="print-auto-cut" type="checkbox"> <span data-i18n="field.auto-cut">auto cut</span>
-        </label>
-        <label data-i18n-attr="title:field.mirror.help" title="Print the design horizontally mirrored. Mainly useful for transparent tape applied behind glass / window decals so it reads correctly from the front.">
-          <input id="print-mirror"   type="checkbox"> <span data-i18n="field.mirror">mirror</span>
-        </label>
-        <label data-i18n-attr="title:field.chain.help" title="Suppress feed + cut at the end of this print. The next print will start exactly where this one ended -- saves the leader on each label. The tape stays inside the printer until you cut it manually or print again with auto cut on.">
-          <input id="print-chain"    type="checkbox"> <span data-i18n="field.chain">chain</span>
-        </label>
         <span class="spacer"></span>
-        <button id="print"     data-i18n="btn.print">Print</button>
+        <button id="print" data-i18n="btn.print">Print</button>
         <button id="print-all" class="secondary" hidden data-i18n="btn.print.all">Print all rows</button>
       </div>
       <div id="log"></div>
@@ -935,7 +913,7 @@ const STRINGS = {
     "panel.status":            "Status",
     "panel.about":             "About",
     "panel.ota":               "Firmware update",
-    "ota.help":                "OTA gate is open (printer in P-Lite mode, or BOOT button toggled). Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.",
+    "ota.help":                "OTA gate is open (printer in Editor Lite mode, or BOOT button toggled). Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.",
     "btn.ota.upload":          "install",
     "lib.btn.download":        "download",
     "lib.btn.open":            "open file…",
@@ -944,7 +922,7 @@ const STRINGS = {
      * textContent assignment can't wipe its <a> tag). The i18n
      * string therefore starts with the dash and tagline, not with
      * the project name. */
-    "about.intro":             "- network print server for the Brother PT-P700 family, ESP32-S3 USB host with a self-hosted web UI.",
+    "about.intro":             "- network print server for the Brother QL-700, running on an ESP32-S3 with a self-hosted web UI.",
     "about.firmware":          "Firmware",
     "about.licenses":          "Third-party components bundled with this firmware:",
     "about.icon.tooltip":      "LabelSis -- open the project page on GitHub",
@@ -1018,8 +996,6 @@ const STRINGS = {
     "field.length.fixed":      "fixed",
     "field.length.help":       "auto: tape length grows to fit the design. fixed: cap at the value below; design is clipped if it overflows.",
     "field.length.mm.help":    "Label length in millimetres (only used when length = fixed).",
-    "field.colors":            "colors",
-    "field.colors.help":       "Render the canvas in the actual tape + ink colours from the loaded cartridge so the on-screen preview matches the print.",
     "field.rulers":             "rulers",
     "field.rulers.help":        "Show millimetre rulers on the canvas edges for layout reference. Doesn't affect the print.",
     "field.grid":               "grid",
@@ -1032,12 +1008,6 @@ const STRINGS = {
     "field.origin.tc":         "top-center",
     "field.origin.cl":         "center-left",
     "field.origin.c":          "center",
-    "field.auto-cut":          "auto cut",
-    "field.auto-cut.help":     "Cut the tape after each label. Brother printers feed ~25 mm of leader tape after each cut, which gets wasted -- leave off if you're printing a single label and don't want the leader to bin.",
-    "field.mirror":            "mirror",
-    "field.mirror.help":       "Print the design horizontally mirrored. Mainly useful for transparent tape applied behind glass / window decals so it reads correctly from the front.",
-    "field.chain":             "chain",
-    "field.chain.help":        "Suppress feed + cut at the end of this print. The next print will start exactly where this one ended -- saves the leader on each label. The tape stays inside the printer until you cut it manually or print again with auto cut on.",
     "field.text":              "text",
     "field.font":              "font",
     "field.style":             "style",
@@ -1209,45 +1179,11 @@ async function setLanguage(lang) {
 let apiHost = (localStorage.getItem("labelsis:apiHost") || "").replace(/\/+$/, "");
 function apiURL(path) { return apiHost + path; }
 
-// SDM p.20 / p.14 tape geometry table (mirrors pt_tape_geometry_tze).
-/* Per-tape geometry. `print` is the printable width in head pins;
- * `margin` is the head's per-side non-printable area (the SDM's
- * left/right margin, NOT the on-tape unprintable border); `dots` is
- * the physical tape width in 180-dpi dots (cross-verified zero-diff
- * against Brother's BSPP70AD.PTD). On-tape unprintable border per
- * side = (dots - print) / 2 -- the visible "tape but won't print"
- * zone in the canvas tinting. The 24 mm tape is wider than the head
- * (170 vs 128 dots), so its on-tape margin reflects the part of the
- * physical tape that no head pin reaches at all. */
-const TAPES = {
-  4:  { print: 24,  margin: 52, dots: 24  },  /* 3.5 mm physical */
-  6:  { print: 32,  margin: 48, dots: 42  },
-  9:  { print: 50,  margin: 39, dots: 64  },
-  12: { print: 70,  margin: 29, dots: 84  },
-  18: { print: 112, margin: 8,  dots: 128 },
-  24: { print: 128, margin: 0,  dots: 170 },
-  62: { print: 696, margin: 12, dots: 720 }, /* QL-700 DK-22205 */
-};
+// Fixed geometry for the supported DK-22205 62 mm continuous roll.
+const QL700_TAPE = { print: 696, margin: 12, dots: 720 };
 
-let printer    = null;  // last /api/status response
-const QL_LAYOUT_KEY = "labelsis:ql700Layout";
-let offlineQlLayout = localStorage.getItem(QL_LAYOUT_KEY) === "ql700";
-function ql700Layout() {
-  if (printer?.printer === "QL-700") return true;
-  if (printer?.ok && printer?.transport === "usb_host") return false;
-  return offlineQlLayout;
-}
+let printer = null;  // last /api/status response
 let deviceInfo = null;  // last /api/info  response (cached, refreshed on demand)
-
-/* Sticky tape-width fallback. When the printer is offline (and so the
- * canvas can't size itself from /api/status), fall back to the last
- * width the user actually printed against rather than always 24 mm.
- * Persists across reloads so the canvas matches the user's typical
- * setup the moment the SPA opens. Defaults to 24 mm on first run
- * (widest tape -- safest "design now, fits anything narrower"). */
-const LAST_TAPE_KEY = "labelsis:lastTapeMm";
-let lastSeenTapeMm = parseInt(localStorage.getItem(LAST_TAPE_KEY) || "24", 10);
-if (!Number.isFinite(lastSeenTapeMm) || !TAPES[lastSeenTapeMm]) lastSeenTapeMm = 24;
 
 /* Set true while the OTA upload is in flight so the 3-s status poll
  * stays out of its way. Without this, HTTP/1.1 keep-alive + the
@@ -1276,14 +1212,6 @@ async function refreshStatus() {
     const r = await fetch(apiURL("/api/status"), { signal: sig });
     const j = await r.json();
     printer = j;
-    /* Cache the live tape width on every successful poll so a later
-     * reload-while-offline picks the right canvas size. Only writes
-     * when the value actually changed -- avoids spamming localStorage
-     * once per 3-s tick. */
-    if (j && j.ok && j.printer !== "QL-700" && TAPES[j.media_width_mm] && j.media_width_mm !== lastSeenTapeMm) {
-      lastSeenTapeMm = j.media_width_mm;
-      try { localStorage.setItem(LAST_TAPE_KEY, String(lastSeenTapeMm)); } catch {}
-    }
     setConnState(j);
     renderStatus(j);
     redraw();
@@ -1300,11 +1228,11 @@ async function refreshStatus() {
     renderStatus(null);
   }
   /* Re-evaluate after every poll, not just on the network-error path.
-   * Otherwise a printer that goes online -> 503 (waiting / plite) keeps
+   * Otherwise a printer that goes online -> 503 (waiting / editor_lite) keeps
    * the print buttons clickable until something else nudges the
    * refresh -- and the user only finds out after the print fails. */
   refreshPrintButtons();
-  /* The OTA panel is auth-gated on the printer being in P-Lite mode
+  /* The OTA panel is auth-gated on the printer being in Editor Lite mode
    * (slider physically in EL). Show/hide it tied to the same poll so
    * sliding the switch back closes the upload window immediately. */
   syncOtaPanel();
@@ -1329,8 +1257,8 @@ function syncOnlineCues(j) {
     log(t("msg.printer.online"), true);
   } else {
     /* "transport" carries the most actionable diagnostic: waiting (no
-     * USB), plite (slider wrong), mock (firmware fallback), or
-     * undefined when /api/status itself failed. */
+     * USB), editor_lite (switch position), or undefined when /api/status
+     * itself failed. */
     const why = (j && j.transport) || "unreachable";
     log(t("msg.printer.offline", { why }), false);
   }
@@ -1349,10 +1277,8 @@ function syncOtaPanel() {
   panel.hidden = !(printer && printer.ota_available);
 }
 
-/* /api/info carries per-device identity (vid/pid/serial/product/
- * manufacturer/firmware) and tape geometry. We fetch it lazily --
- * once at boot, and again whenever the user opens the Status view
- * -- since it doesn't change between prints. */
+/* /api/info carries firmware metadata. Fetch it lazily -- once at
+ * boot, and again whenever the user opens the Status view. */
 async function refreshDeviceInfo() {
   try {
     const r = await fetch(apiURL("/api/info"));
@@ -1367,83 +1293,21 @@ async function refreshDeviceInfo() {
   if (printer) renderStatus(printer);
 }
 
-/* Drive the title-bar dot. Green only when there's a real printer
- * attached AND no error bits set. Anything else (mock fallback,
- * P-Lite mode, network down, error1/2 bits) is red. */
+/* Drive the title-bar dot. It is green only when a QL-700 is attached
+ * and reports no printer error. */
 function setConnState(j) {
   const h1 = document.getElementById("title");
-  const ok = j && j.ok && j.transport === "usb_host"
+  const ok = j && j.ok && j.printer === "QL-700" && j.transport === "usb_host"
              && !j.error1 && !j.error2;
   h1.className = ok ? "online" : "offline";
 }
 
-
-/* Lookup tables for ID-style fields the printer reports. Keep in
- * sync with the SDM if these grow. */
-const TAPE_COLORS = {
-  0x01: "white",   0x02: "other",  0x03: "clear",
-  0x04: "red",     0x05: "blue",   0x06: "yellow",
-  0x07: "green",   0x08: "black",  0x09: "clear (white text)",
-  0x20: "matte white",       0x21: "matte clear",   0x22: "matte silver",
-  0x23: "satin gold",        0x24: "satin silver",  0x30: "blue (D)",
-  0x31: "red (D)",           0x40: "fluor. orange", 0x41: "fluor. yellow",
-  0x50: "berry pink",        0x51: "light gray",    0x52: "lime green",
-  0x60: "yellow (F)",        0x61: "pink (F)",      0x62: "blue (F)",
-  0x70: "white (heat)",      0x90: "white (flex)",  0x91: "yellow (flex)",
-  0xF0: "cleaning",          0xF1: "stencil",       0xFF: "incompatible",
-};
-const TEXT_COLORS = {
-  0x01: "white",   0x04: "red",    0x05: "blue",
-  0x08: "black",   0x0A: "gold",   0xF0: "cleaning",
-  0x02: "other",   0xFF: "incompatible",
-};
-/* RGB triples for the ID lookup, used by the on-canvas "colors"
- * preview. Closely-matched physical-tape approximations -- these
- * never go to the printer, only to the CRT. Missing IDs fall back
- * to the swatchMap -> white/black so colour mode still produces
- * something legible for tapes we haven't catalogued yet. */
-const TAPE_COLOR_RGB = {
-  0x01: [255,255,255], 0x02: [200,200,200], 0x03: [228,232,235],
-  0x04: [207, 34, 46], 0x05: [  9,105,218], 0x06: [255,210, 60],
-  0x07: [ 26,127, 55], 0x08: [ 31, 35, 40], 0x09: [228,232,235],
-  0x20: [241,241,241], 0x21: [210,215,220], 0x22: [192,192,192],
-  0x23: [218,165, 32], 0x24: [192,192,192], 0x30: [  9,105,218],
-  0x31: [207, 34, 46], 0x40: [255,127,  0], 0x41: [255,250, 80],
-  0x50: [240, 99,160], 0x51: [200,200,200], 0x52: [148,217, 80],
-  0x60: [255,210, 60], 0x61: [240, 99,160], 0x62: [  9,105,218],
-  0x70: [255,255,255], 0x90: [255,255,255], 0x91: [255,210, 60],
-};
-const TEXT_COLOR_RGB = {
-  0x01: [255,255,255], 0x04: [207, 34, 46], 0x05: [  9,105,218],
-  0x08: [ 31, 35, 40], 0x0A: [218,165, 32],
-};
-
 const PHASE_TYPES = { 0: "editing", 1: "printing" };
-const STATUS_TYPES = {
-  0x00: "reply to status request", 0x01: "printing completed",
-  0x02: "error occurred",          0x03: "exit IF mode",
-  0x04: "turned off",              0x05: "notification",
-  0x06: "phase change",
-};
-
-function colorChip(name, fallback) {
-  if (!name) return fallback || "?";
-  const swatchMap = {
-    white: "#ffffff", clear: "#e9ecef", red: "#cf222e", blue: "#0969da",
-    yellow: "#ffd33d", green: "#1a7f37", black: "#1f2328",
-    gold: "#daa520", "matte white": "#f1f1f1",
-  };
-  const c = swatchMap[name];
-  if (!c) return name;
-  return `<span class="color-chip" style="background:${c}"></span> ${name}`;
-}
 
 function transportLabel(tx) {
-  if (tx === "usb_host") return ["real PT-* printer (USB)", "kv-ok"];
-  if (tx === "mock")     return ["mock backend (no printer attached)", "kv-err"];
-  if (tx === "plite")    return ["P-Lite mode - slide switch to E or hold the PLite button 2 s", "kv-err"];
-  if (tx === "waiting")  return ["no printer attached - design works, print waits for hot-plug", "kv-err"];
-  if (tx === "libusb")   return ["libusb (host-side test transport)", "kv-ok"];
+  if (tx === "usb_host") return ["Brother QL-700 (USB)", "kv-ok"];
+  if (tx === "editor_lite") return ["Editor Lite mode - switch to normal mode", "kv-err"];
+  if (tx === "waiting") return ["waiting for Brother QL-700 USB connection", "kv-err"];
   return [tx || "?", "kv-err"];
 }
 
@@ -1455,63 +1319,28 @@ function apiHostLabel() {
 function renderStatus(j) {
   const g = document.getElementById("status");
   g.innerHTML = "";
-
-  /* Connection block -- always shown, even if /api/status failed. */
   g.innerHTML += `<span class="k">API host</span><span>${escapeHtml(apiHostLabel())}</span>`;
-
   if (!j) {
     g.innerHTML += `<span class="k">transport</span><span class="kv-err">unreachable</span>`;
     return;
   }
-
   const [txLabel, txCls] = transportLabel(j.transport);
   g.innerHTML += `<span class="k">transport</span><span class="${txCls}">${txLabel}</span>`;
-
   if (!j.ok) {
+    g.innerHTML += `<span class="k">printer</span><span>Brother QL-700</span>`;
     g.innerHTML += `<span class="k">error</span><span class="kv-err">${escapeHtml(j.error || "?")}</span>`;
     return;
   }
-
-  if (j.printer === "QL-700") {
-    const fields = [
-      ["printer", "Brother QL-700"],
-      ["media", `${j.media_width_mm}mm ${j.media_kind || "unknown"}`],
-      ["print support", j.print_supported ? "DK-22205 ready" : "unsupported DK roll"],
-      ["status", j.ready ? "ready" : (j.error || "not ready")],
-      ["error1/2", `${j.error1 ?? 0} / ${j.error2 ?? 0}`],
-      ["phase", PHASE_TYPES[j.phase_type] || "unknown"],
-    ];
-    for (const [k, v] of fields)
-      g.innerHTML += `<span class="k">${escapeHtml(k)}</span><span>${escapeHtml(String(v))}</span>`;
-    return;
-  }
-  const info = deviceInfo && deviceInfo.ok ? deviceInfo : {};
-  const tape = TAPES[j.media_width_mm];
-  const tapeColor = TAPE_COLORS[j.tape_color_id];
-  const textColor = TEXT_COLORS[j.text_color_id];
-  const phase     = PHASE_TYPES[j.phase_type] ?? `0x${(j.phase_type|0).toString(16)}`;
-  const stat      = STATUS_TYPES[j.status_type] ?? `0x${(j.status_type|0).toString(16)}`;
-
-  const rows = [
-    ["model",         "0x" + j.model.toString(16) + (j.model === 0x70 ? " (PT-P700)" : "")],
-    info.product      && ["product",      escapeHtml(info.product)],
-    info.manufacturer && ["manufacturer", escapeHtml(info.manufacturer)],
-    info.serial       && ["serial",       escapeHtml(info.serial)],
-    (info.vid != null && info.pid != null) &&
-      ["USB id",      `${info.vid.toString(16).padStart(4,"0")}:${info.pid.toString(16).padStart(4,"0")}`],
-    info.fw_version   && ["firmware",     escapeHtml(info.fw_version)],
-    ["tape width",    `${j.media_width_mm} mm  (${tape ? tape.print : "?"} print pins)`],
-    tapeColor && ["tape color",  colorChip(tapeColor, "0x"+j.tape_color_id.toString(16))],
-    textColor && ["text color",  colorChip(textColor, "0x"+j.text_color_id.toString(16))],
-    ["error1/2",      `0x${j.error1.toString(16)} / 0x${j.error2.toString(16)}`,
-                      (j.error1 || j.error2) ? "kv-err" : "kv-ok"],
-    ["phase",         phase],
-    ["status",        stat],
-  ].filter(Boolean);
-
-  for (const [k, v, cls] of rows) {
-    g.innerHTML += `<span class="k">${k}</span><span class="${cls||""}">${v}</span>`;
-  }
+  const fields = [
+    ["printer", "Brother QL-700"],
+    ["media", `${j.media_width_mm}mm ${j.media_kind || "unknown"}`],
+    ["print support", j.print_supported ? "DK-22205 ready" : "requires DK-22205 62 mm continuous roll"],
+    ["status", j.ready ? "ready" : (j.error || "not ready")],
+    ["error1/2", `${j.error1 ?? 0} / ${j.error2 ?? 0}`],
+    ["phase", PHASE_TYPES[j.phase_type] || "unknown"],
+  ];
+  for (const [k, v] of fields)
+    g.innerHTML += `<span class="k">${escapeHtml(k)}</span><span>${escapeHtml(String(v))}</span>`;
 }
 
 /* label model: positioned elements
@@ -1523,11 +1352,10 @@ function renderStatus(j) {
  * scaffolding is type-dispatched so adding them is a render-fn +
  * a property-panel section, not a rewrite.
  */
-let HEAD_PX = 128;          /* PT-*: 128 dots; QL-700: 720 dots */
+let HEAD_PX = 720;          /* QL-700 print head: 720 dots */
 
-/* The canvas always shows the full HEAD_PX-wide head extent so the
- * user has a stable visual frame regardless of which tape is
- * loaded. The on-screen canvas paints three nested zones top-to-
+/* The canvas always shows the full 720-dot QL-700 head extent so the
+ * user has a stable visual frame for the supported 62 mm roll. The on-screen canvas paints three nested zones top-to-
  * bottom: (a) "head past tape" -- dark band where head pins exist
  * but no tape; (b) "tape but unprintable" -- light red band; (c)
  * print area -- white. Element coordinates remain in head-pin
@@ -1539,7 +1367,7 @@ const PAD     = 24;           /* extra canvas margin so selection
                                  the on-screen rulers. Only applied
                                  for the on-screen redraw -- packRaster
                                  uses an unpadded redraw(true). */
-let PX_PER_MM = 180 / 25.4; /* QL-700 will use 300 dpi */
+let PX_PER_MM = 300 / 25.4; /* QL-700: 300 dpi */
 const mmToPx = mm => mm * PX_PER_MM;
 /* Soft cap on auto-extending label width -- protects against
  * sluggishness from a stray element dragged off-canvas. 2500 px
@@ -1556,7 +1384,6 @@ const CANVAS_OPTS_DEFAULT = {
   showRulers:     true,
   showGrid:       false,
   showCenter:     false,
-  showColors:     false,
   origin:         "tl",     /* "tl" | "tc" | "cl" | "c"            */
 };
 let canvasOpts = (() => {
@@ -2560,28 +2387,15 @@ function redraw(forPrint = false) {
    * print path bypasses persistence -- it builds a tight raster on a
    * different canvas and shouldn't trigger an autosave. */
   if (!forPrint) saveSession();
-  HEAD_PX = ql700Layout() ? 720 : 128;
-  PX_PER_MM = ql700Layout() ? (300 / 25.4) : (180 / 25.4);
+  HEAD_PX = 720;
+  PX_PER_MM = 300 / 25.4;
   const c    = document.getElementById("preview");
   const ctx  = c.getContext("2d");
-  /* Live tape width when /api/status answered with one; otherwise the
-   * last width we saw on this browser (sticky via localStorage), or
-   * 24 mm on a brand-new install. See LAST_TAPE_KEY. */
-  const tape = ql700Layout() ? TAPES[62] : (
-    printer && printer.ok && TAPES[printer.media_width_mm]
-      ? TAPES[printer.media_width_mm]
-      : (TAPES[lastSeenTapeMm] || TAPES[24]));
-  const printPx  = tape ? tape.print  : 128;
-  const marginPx = tape ? tape.margin : 0;
-  /* Per-side breakdown within the canvas (head extent):
-   *   offTapePx  = head pins where no tape exists at all
-   *   tapeBandPx = head pins on the tape but unprintable (border)
-   *   printPx    = the printable centre band
-   * Always: offTapePx + tapeBandPx == marginPx (= head's per-side
-   * non-printable margin from the SDM). For tapes wider than the
-   * head (24mm: dots=170 > HEAD_PX=128) offTapePx clamps to 0 and
-   * tapeBandPx is also 0 since print pins fill the head. */
-  const tapeDots    = tape ? tape.dots : HEAD_PX;
+  const printPx  = QL700_TAPE.print;
+  const marginPx = QL700_TAPE.margin;
+  /* The 62 mm media layout has a 12-dot unprintable margin per side
+   * and a 696-dot printable centre band. */
+  const tapeDots    = QL700_TAPE.dots;
   const tapeBandPx  = Math.max(0, ((tapeDots - printPx) / 2) | 0);
   const offTapePx   = Math.max(0, marginPx - tapeBandPx);
 
@@ -2611,7 +2425,7 @@ function redraw(forPrint = false) {
     printW = Math.min(wanted, PRINT_W_MAX);
   }
 
-  if (ql700Layout()) {
+  {
     if (printW > 1500) overflow = true;
     printW = Math.max(360, Math.min(1500, printW));
   }
@@ -2666,7 +2480,6 @@ function redraw(forPrint = false) {
   /* "Colors" preview -- replace b/w pixels in the print band only.
    * Pure UI; the print raster is unaffected (postPrint runs
    * redraw(true)). */
-  if (canvasOpts.showColors) applyTapeColors(ctx, printW, marginPx, printPx);
 
   /* Centre guides + selection chrome on top of any colour remap so
    * they stay legible regardless of tape colour. */
@@ -2719,42 +2532,6 @@ function redraw(forPrint = false) {
    * inside drawElement(), so reading them at the start of redraw
    * would always be one frame stale. */
   if (!forPrint) refreshPrintButtons();
-}
-
-/* Re-colour the on-screen *printable* strip -- i.e. only the band
- * within the tape that head pins actually print on. The on-tape
- * unprintable border (the red tint outside this band) keeps its
- * existing colour. Reads/writes happen in canvas-absolute
- * coordinates so the current transform doesn't matter. Skips when
- * printer info or colour mappings are missing -- falls back to
- * leaving the b/w preview alone. */
-function applyTapeColors(ctx, printW, marginPx, printPx) {
-  if (!printer || !printer.ok) return;
-  const tape = TAPE_COLOR_RGB[printer.tape_color_id];
-  const text = TEXT_COLOR_RGB[printer.text_color_id];
-  if (!tape || !text) return;
-  const top  = PAD + (marginPx || 0);
-  const h    = printPx || HEAD_PX;
-  if (h <= 0) return;
-  const img = ctx.getImageData(PAD, top, printW, h);
-  const px  = img.data;
-  for (let i = 0; i < px.length; i += 4) {
-    /* alpha=0 = "tape shows through" (e.g. XOR/NOT/AND punched a
-     * hole). Force opaque tape colour so the preview shows the
-     * actual tape colour, not whatever's behind the canvas
-     * element in the DOM. */
-    if (px[i + 3] < 128) {
-      px[i] = tape[0]; px[i+1] = tape[1]; px[i+2] = tape[2]; px[i+3] = 255;
-      continue;
-    }
-    const lum = (px[i] + px[i+1] + px[i+2]) / 3;
-    const c   = lum < 128 ? text : tape;
-    px[i]   = c[0];
-    px[i+1] = c[1];
-    px[i+2] = c[2];
-    px[i+3] = 255;
-  }
-  ctx.putImageData(img, PAD, top);
 }
 
 function drawGrid(ctx, w, h) {
@@ -2981,60 +2758,42 @@ function drawSelectionChrome(ctx, el) {
   ctx.restore();
 }
 
-/* Pack the current canvas to the 16-byte-per-raster-row layout
- * pt_bitmap_to_raster expects: for each raster line (= canvas column),
- * 16 bytes encoding the 128 pins MSB-first. */
-function packRaster(canvas, ql700 = false) {
+/* Pack the QL-700 720-dot head into 90 bytes per raster column. */
+function packRaster(canvas) {
   const ctx  = canvas.getContext("2d");
   const w    = canvas.width;
   const data = ctx.getImageData(0, 0, w, canvas.height).data;
-  const rowBytes = ql700 ? 90 : 16;
+  const rowBytes = 90;
   const out = new Uint8Array(w * rowBytes);
-  const h = Math.min(canvas.height, ql700 ? 720 : 128);
+  const h = Math.min(canvas.height, 720);
   for (let x = 0; x < w; x++) {
-    for (let y = 0; y < h; y++) {
-      if (ql700 && (y < 12 || y >= 708)) continue; // unprintable head margins
+    for (let y = 12; y < Math.min(h, 708); y++) {
       const i = (y * w + x) * 4;
-      /* Ink only when the pixel is BOTH opaque AND below the
-       * luminance threshold. Transparent pixels (alpha < 128) are
-       * "tape shows through" and must NOT print as ink -- XOR/NOT/AND
-       * blend modes can produce alpha=0 holes whose RGB is whatever
-       * was last painted (often 0,0,0,0 by canvas default). */
-      if (data[i+3] < 128) continue;
-      const lum = (data[i] + data[i+1] + data[i+2]) / 3;
+      if (data[i + 3] < 128) continue;
+      const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
       if (lum < 128) out[x * rowBytes + (y >> 3)] |= 0x80 >> (y & 7);
     }
   }
   return out;
 }
 
-document.getElementById("ql700-layout").value = offlineQlLayout ? "ql700" : "auto";
-document.getElementById("ql700-layout").addEventListener("change", ev => {
-  offlineQlLayout = ev.target.value === "ql700";
-  localStorage.setItem(QL_LAYOUT_KEY, offlineQlLayout ? "ql700" : "auto");
-  redraw();
-});
 async function postPrint() {
   labelSisCheckFontsForPrint();
-  const isQl = printer?.printer === "QL-700";
-  const c    = document.getElementById("preview");
-  redraw(true);              /* clean canvas: elements only */
-  const oversizedQl = isQl && (
-    (canvasOpts.labelWidthMode === "fixed" && mmToPx(canvasOpts.labelWidthMm) > 1500) ||
-    elements.some(el => { const b = elementBounds(el); return b.x + b.w > 1500; })
-  );
-  const body = oversizedQl ? null : packRaster(c, isQl);
+  const c = document.getElementById("preview");
+  redraw(true);
+  const oversized = (canvasOpts.labelWidthMode === "fixed" && mmToPx(canvasOpts.labelWidthMm) > 1500) ||
+    elements.some(el => { const b = elementBounds(el); return b.x + b.w > 1500; });
+  const body = oversized ? null : packRaster(c);
   redraw();
-  if (oversizedQl) throw new Error("ql700_label_exceeds_127mm_limit");                  /* restore overlay UI */
-  const headers = {
-    "Content-Type":   "application/octet-stream",
-    "X-Auto-Cut":     document.getElementById("print-auto-cut").checked.toString(),
-    "X-Mirror":       document.getElementById("print-mirror").checked.toString(),
-    "X-Chain":        document.getElementById("print-chain").checked.toString(),
-  };
-  if (isQl) headers["X-QL700-Confirm"] = "print-62mm";
-  const r = await fetch(apiURL(isQl ? "/api/ql700/print" : "/api/print"),
-                        { method: "POST", headers, body });
+  if (oversized) throw new Error("ql700_label_exceeds_127mm_limit");
+  const r = await fetch(apiURL("/api/ql700/print"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "X-QL700-Confirm": "print-62mm",
+    },
+    body,
+  });
   const j = await r.json();
   if (!j.ok) throw new Error(j.error);
   return j;
@@ -3648,36 +3407,22 @@ function refreshUndoButtons() {
 let printingInProgress = false;
 let _lastPrintErr      = null;
 function refreshPrintButtons() {
-  const err     = elements.some(e => e._barcodeError || e._qrError);
-  /* Treat anything other than a real USB printer as "no printer" --
-   * waiting / plite / mock all mean Print would either fail or print
-   * to nothing useful. The firmware returns 503 "no_printer" while
-   * waiting; this just disables the button up-front so the user
-   * doesn't get a delayed error. */
-  const noPrint = !printer || !printer.ok || printer.transport !== "usb_host";
+  const err = elements.some(e => e._barcodeError || e._qrError);
+  const noPrint = !printer || !printer.ok || printer.transport !== "usb_host" || printer.printer !== "QL-700";
   const badQlMedia = printer?.printer === "QL-700" &&
     !(printer.ready && printer.print_supported && printer.media_width_mm === 62 &&
       printer.media_type === 74 && printer.media_length_mm === 0);
   const print = document.getElementById("print");
-  const all   = document.getElementById("print-all");
+  const all = document.getElementById("print-all");
   if (!print || !all) return;
   print.disabled = err || noPrint || badQlMedia || printingInProgress;
-  all.disabled   = err || noPrint || badQlMedia || printingInProgress;
-  for (const id of ["print-mirror", "print-chain"]) {
-    document.getElementById(id).disabled = printer?.printer === "QL-700";
-  }
-  if (printer?.printer === "QL-700") {
-    document.getElementById("print-auto-cut").checked = true;
-    document.getElementById("print-auto-cut").disabled = true;
-  } else {
-    document.getElementById("print-auto-cut").disabled = false;
-  }
-  const tip = err     ? "Fix barcode / QR errors before printing"
-            : noPrint ? "No printer attached -- design now, print when it shows up"
+  all.disabled = err || noPrint || badQlMedia || printingInProgress;
+  const tip = err ? "Fix barcode / QR errors before printing"
+            : noPrint ? "Connect a Brother QL-700 to print"
             : "";
-  const qlMediaTip = "QL-700 requires a ready 62 mm continuous DK-22205 roll";
+  const qlMediaTip = "QL-700 printing requires a ready 62 mm continuous DK-22205 roll";
   print.title = badQlMedia ? qlMediaTip : tip;
-  all.title   = badQlMedia ? qlMediaTip : tip;
+  all.title = badQlMedia ? qlMediaTip : tip;
   if (_lastPrintErr !== null && _lastPrintErr !== err) renderLayerList();
   _lastPrintErr = err;
 }
@@ -3709,11 +3454,6 @@ function saveSession() {
         csvCurrentRow,
         csvShowHeader,
         view:        document.querySelector("nav a.active")?.dataset.view || "print",
-        printOpts: {
-          autoCut: document.getElementById("print-auto-cut").checked,
-          mirror:  document.getElementById("print-mirror").checked,
-          chain:   document.getElementById("print-chain").checked,
-        },
       };
       localStorage.setItem(SESSION_KEY, JSON.stringify(data));
     } catch (e) { /* quota / serialization errors -- silent */ }
@@ -3739,12 +3479,7 @@ function loadSession() {
     }
     if (Number.isFinite(data.csvCurrentRow)) csvCurrentRow = data.csvCurrentRow;
     if (typeof data.csvShowHeader === "boolean") csvShowHeader = data.csvShowHeader;
-    if (data.printOpts) {
-      const opts = data.printOpts;
-      if (typeof opts.autoCut === "boolean") document.getElementById("print-auto-cut").checked = opts.autoCut;
-      if (typeof opts.mirror  === "boolean") document.getElementById("print-mirror").checked   = opts.mirror;
-      if (typeof opts.chain   === "boolean") document.getElementById("print-chain").checked    = opts.chain;
-    }
+
     if (typeof data.view === "string") showView(data.view);
     syncPropsPanel();
     renderLayerList();
@@ -3841,7 +3576,7 @@ function libClear() {
 
 /* design files: one design = one file
  *
- * {format, version, name, saved, dpi, head, tape, canvas, printOpts,
+ * {format, version, name, saved, dpi, head, tape, canvas,
  *  elements}. The element list is the same body that goes into
  * localStorage (runtime caches stripped). `dpi` exists so a file made
  * on a 180-dpi layout still lands at the right physical size on a
@@ -3849,10 +3584,10 @@ function libClear() {
  * import. Files without `dpi` are treated as legacy 180-dpi saves. */
 const DESIGN_FORMAT  = "labelsis-design";
 const DESIGN_VERSION = 1;
-const DESIGN_LEGACY_DPI = 180;
+const DESIGN_LEGACY_DPI = 180; // Imported older design files are scaled to QL-700 300 dpi.
 
 function currentDpi() {
-  return ql700Layout() ? 300 : 180;
+  return 300;
 }
 
 function designDoc() {
@@ -3865,18 +3600,13 @@ function designDoc() {
     head:    HEAD_PX,
     tape: {
       type:     "continuous",
-      media:    ql700Layout() ? "DK-22205" : null,
-      widthMm:  ql700Layout() ? 62 : lastSeenTapeMm,
+      media:    "DK-22205",
+      widthMm:  62,
       lengthMm: 0,
     },
     canvas: {
       labelWidthMode: canvasOpts.labelWidthMode,
       labelWidthMm:   canvasOpts.labelWidthMm,
-    },
-    printOpts: {
-      autoCut: document.getElementById("print-auto-cut").checked,
-      mirror:  document.getElementById("print-mirror").checked,
-      chain:   document.getElementById("print-chain").checked,
     },
     elements: elements.map(stripCached),
   };
@@ -3933,7 +3663,7 @@ function scaleElementForDpi(el, ratio) {
 /* Apply a parsed design file. Returns an error string, or null. */
 function applyDesignDoc(doc, filename) {
   /* Bare array = a library entry or an old session snapshot. */
-  let list, dpi = DESIGN_LEGACY_DPI, docName = "", canvas = null, printOpts = null;
+  let list, dpi = DESIGN_LEGACY_DPI, docName = "", canvas = null;
   if (Array.isArray(doc)) {
     list = doc;
   } else if (doc && typeof doc === "object" && Array.isArray(doc.elements)) {
@@ -3945,7 +3675,6 @@ function applyDesignDoc(doc, filename) {
     if (isFinite(doc.dpi) && doc.dpi > 0) dpi = doc.dpi;
     docName    = typeof doc.name === "string" ? doc.name.trim() : "";
     canvas     = doc.canvas && typeof doc.canvas === "object" ? doc.canvas : null;
-    printOpts  = doc.printOpts && typeof doc.printOpts === "object" ? doc.printOpts : null;
   } else {
     return "no label elements in this file";
   }
@@ -3971,16 +3700,6 @@ function applyDesignDoc(doc, filename) {
     if ($mode) $mode.value = canvasOpts.labelWidthMode;
     if ($mm)   { $mm.value = canvasOpts.labelWidthMm; $mm.disabled = canvasOpts.labelWidthMode !== "fixed"; }
   }
-  if (printOpts) {
-    const set = (id, key) => {
-      if (typeof printOpts[key] !== "boolean") return;
-      const box = document.getElementById(id);
-      if (box && !box.disabled) box.checked = printOpts[key];
-    };
-    set("print-mirror", "mirror");
-    set("print-chain",  "chain");
-  }
-
   currentLabelName = docName;
   syncPropsPanel();
   renderLayerList();
@@ -5426,7 +5145,6 @@ document.getElementById("csv-clear").addEventListener("click", () => {
 (function wireCanvasOpts() {
   const $mode   = document.getElementById("opt-len-mode");
   const $mm     = document.getElementById("opt-len-mm");
-  const $colors = document.getElementById("opt-colors");
   const $rulers = document.getElementById("opt-rulers");
   const $grid   = document.getElementById("opt-grid");
   const $center = document.getElementById("opt-center");
@@ -5436,7 +5154,6 @@ document.getElementById("csv-clear").addEventListener("click", () => {
     $mode.value     = canvasOpts.labelWidthMode;
     $mm.value       = canvasOpts.labelWidthMm;
     $mm.disabled    = canvasOpts.labelWidthMode !== "fixed";
-    $colors.checked = !!canvasOpts.showColors;
     $rulers.checked = !!canvasOpts.showRulers;
     $grid.checked   = !!canvasOpts.showGrid;
     $center.checked = !!canvasOpts.showCenter;
@@ -5461,7 +5178,7 @@ document.getElementById("csv-clear").addEventListener("click", () => {
     canvasOpts.labelWidthMm = Math.max(5, Math.min(500, v));
     saveCanvasOpts(); redraw();
   });
-  for (const [el, key] of [[$colors, "showColors"], [$rulers, "showRulers"], [$grid, "showGrid"], [$center, "showCenter"]]) {
+  for (const [el, key] of [[$rulers, "showRulers"], [$grid, "showGrid"], [$center, "showCenter"]]) {
     el.addEventListener("change", () => {
       canvasOpts[key] = el.checked;
       saveCanvasOpts(); redraw();
@@ -5758,7 +5475,7 @@ function wifiInit() {
   refreshWifiList();
 }
 
-/* OTA upload. Server enforces P-Lite gate on every byte; this code
+/* OTA upload. Server enforces Editor Lite gate on every byte; this code
  * only nudges the user (file picker disabled until a file is picked)
  * and shows progress. fetch() doesn't expose upload progress, so we
  * use XMLHttpRequest -- the one place in the SPA where it's worth it. */
@@ -5987,11 +5704,6 @@ if (!loadSession()) {
 }
 libRefresh();
 refreshUndoButtons();
-
-/* Persist print options when the user toggles them. */
-for (const id of ["print-auto-cut", "print-mirror", "print-chain"]) {
-  document.getElementById(id).addEventListener("change", saveSession);
-}
 
 refreshStatus();
 refreshDeviceInfo();

@@ -4,10 +4,7 @@
 
 #include "pt_app.h"
 
-/* Per-board pin/LED defaults. boards/<name>/board.h defines BOARD_NAME,
- * BOARD_LED_{TYPE,GPIO,ACTIVE_LOW}, BOARD_RESET_GPIO. The top-level
- * CMakeLists.txt picks <name> from -D BOARD=... and adds boards/<name>/
- * to the include path; see boards/README.md for adding a new one. */
+/* ESP32-S3 DevKitC-1 pin and LED assignments. */
 #include "board.h"
 
 /* Real Wi-Fi creds, gitignored -- copy main/wifi_credentials.example.h
@@ -31,16 +28,9 @@ void app_main(void)
         .wifi_ssid              = WIFI_SSID,
         .wifi_password          = WIFI_PASSWORD,
         .http_port              = 80,
-        .use_usb_host           = true,   /* try the real printer first;
-                                             falls back to mock after the
-                                             usb_connect_timeout below */
         .usb_connect_timeout_ms = 5000,
         .reset_gpio_num         = BOARD_RESET_GPIO,
-        /* Status LED -- board profile picks the type/pin. To disable
-         * entirely on a board that has no usable LED, set
-         *   #define BOARD_LED_TYPE PT_LED_TYPE_NONE
-         * in boards/<name>/board.h. Cadence/colour table lives in
-         * components/pt_app/src/pt_led.c. */
+        /* Status LED is the DevKitC-1 onboard RGB pixel (GPIO 48). */
         .led = {
             .type       = BOARD_LED_TYPE,
             .gpio       = BOARD_LED_GPIO,

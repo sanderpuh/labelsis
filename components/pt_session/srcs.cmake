@@ -1,6 +1,0 @@
-set(PT_SESSION_SRCS
-    ${CMAKE_CURRENT_LIST_DIR}/src/pt_session.c
-)
-set(PT_SESSION_INCLUDE_DIRS
-    ${CMAKE_CURRENT_LIST_DIR}/include
-)

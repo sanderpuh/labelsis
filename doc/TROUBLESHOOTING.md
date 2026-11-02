@@ -1,20 +1,15 @@
 # Troubleshooting
 
-First-hour symptom catalog.
-
-| Symptom | Likely cause |
+| Symptom | Likely cause / fix |
 |---|---|
-| No boot log on `idf.py monitor` | Wrong USB port -- use the **UART** port (left of devkit, near reset/boot buttons), not the native USB (right). See [HARDWARE.md](HARDWARE.md#devkit-usb-ports). |
-| `wifi: failed` in log | Wrong `WIFI_SSID` / `WIFI_PASSWORD` in `main/wifi_credentials.h`, or `WIFI_AUTH_WPA2_PSK` mismatch (open / WPA3-only networks not supported). Or just delete the file and use AP-mode onboarding. |
-| `transport: waiting -- no PT-* attached` | Printer not plugged in, plugged into the wrong port (use the **right** USB-C / OTG port for the printer), or printer powered off. SPA still loads; printer-state UI shows the issue. |
-| `transport: P-Lite mode …` | Side slider in EL position. Slide to E or hold the printer's PLite button for 2 s; the ESP picks up the re-enumerated device automatically within a few seconds. Details in [USAGE.md](USAGE.md#p-lite-mode). |
-| Print returns timeout | If `/api/status` shows `transport: usb_host` (not `mock`), and the printer has tape, check `print_timeout_ms` in `pt_app_config_t` -- default 120 s suffices for ~3 m of label. |
-| `labelsis.local` doesn't resolve | mDNS support missing on your OS (rare on macOS/Linux, common on Windows without iTunes/Bonjour) or blocked by your router (enterprise / mesh client-isolation). Use the printed IP from the boot log, or check the router's DHCP table for `labelsis`. |
-| `httpd_register_uri_handler: no slots` | `cfg.max_uri_handlers` in `http_up()` is too low for the routes you're trying to register. Bump it. Currently 24 in `http_up`, 16 in `http_ap_up`. |
-| OTA upload finishes but the SPA / `labelsis-ota.py` reports "install was rejected -- still running from same slot" | The bytes reached the device but `esp_ota_end` / `esp_ota_set_boot_partition` rejected the image. Causes: SHA mismatch from a truncated upload (`image_validate`), wrong firmware family (`wrong_project`, e.g. uploading a non-`labelsis` ESP-IDF binary), or flash-slot in a bad state from a prior aborted OTA (`ota_write`). Check `idf.py monitor` for the underlying error token. |
-| OTA "no clean response" / "network error during upload" with the install actually succeeding | Expected: the firmware sends its 200 OK then `esp_restart()`s 2 s later, and the hardware reset routinely yanks the radio before the FIN flushes. The SPA + CLI both poll `/api/ota/status` afterwards and confirm via `running_slot` flip; this is the unambiguous signal that the install took. Version-string equality means nothing if you rebuilt from the same git revision. |
-| Build complains about PSRAM / flash size / partition overflow on the wrong chip | You probably switched targets without nuking the build. `idf.py` only consumes `SDKCONFIG_DEFAULTS` (and the per-board overlay) on initial config. Run `rm -rf build sdkconfig && idf.py -D BOARD=<name> set-target <s2\|s3> && idf.py build`. See [boards/README.md](../boards/README.md). |
-| Status LED stays off | Either `.led.type = PT_LED_TYPE_NONE`, or the configured GPIO is wrong for your board. Default is GPIO 48 (DevKitC-1 onboard RGB); check `pt_app_config_t.led` in `main/main.c`. |
-| Captive portal doesn't pop on phone | iOS/Android probes time out before the DNS server is up if the device just booted. Disconnect + reconnect to `labelsis-setup` after a few seconds. If that still fails, navigate to `http://192.168.4.1/` manually. |
-| Cannot connect to `labelsis-setup` AP | The AP is open (no password) by design for first-boot. If your phone insists on a password, choose "Skip / no internet" when prompted. |
-| BOOT-button reset doesn't seem to work | The default GPIO 0 is the devkit's BOOT button, but it must be held during runtime (not at reset/power-on). Hold past **30 seconds without releasing** to wipe creds; releasing any time between 2 and 30 s toggles the OTA gate instead -- but the OTA toggle only counts once the device is online (Wi-Fi STA up + HTTP serving), so an early tap during boot is suppressed. Wipe ignores the online guard so a bricked-Wi-Fi board can still recover. The 30 s wipe threshold is deliberately long since the action is destructive. The serial log narrates both transitions. |
+| No boot log in PlatformIO Serial Monitor | Use the DevKitC-1 **left-hand UART USB-C** port, not the native USB-OTG port connected to the printer. |
+| Wi-Fi connection fails | Check `WIFI_SSID` / `WIFI_PASSWORD` in `main/wifi_credentials.h`, or remove that file and use the `labelsis-setup` onboarding network. |
+| `transport: waiting` | Check that the QL-700 is powered on and connected to the DevKitC-1's **right-hand USB-OTG** port. |
+| `transport: editor_lite` | The QL-700 is in Editor Lite mode. Switch it back to normal printer mode; the firmware retries USB enumeration automatically. |
+| Print button remains disabled | Printing requires a connected QL-700, no printer errors, and a ready DK-22205 62 mm continuous roll. Other media geometries are not yet supported for printing. |
+| `labelsis.local` does not resolve | Use the device IP from the serial log or your router's DHCP table. Some Windows installations need Bonjour; some networks block mDNS. |
+| OTA is unavailable | Switch the QL-700 to Editor Lite mode or hold the device BOOT button for 2–30 seconds and release. The BOOT gesture only toggles OTA after Wi-Fi and HTTP are online. |
+| OTA reports an image or flash error | Check the `error` and `esp_err` fields returned by the OTA API. Build the image with `pio run -e ql700` and ensure it is this project's `firmware.bin`. |
+| Status LED stays off | The onboard RGB LED is GPIO 48 on the DevKitC-1. Check the board and LED configuration in `boards/devkitc_s3/board.h`. |
+| Captive portal does not open automatically | Connect to `labelsis-setup`, then browse to `http://192.168.4.1/` manually. |
+| BOOT button reset does not work | Hold GPIO 0 for at least 30 seconds without releasing to wipe Wi-Fi credentials. Releasing between 2 and 30 seconds toggles the OTA gate instead. |

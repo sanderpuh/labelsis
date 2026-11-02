@@ -19,7 +19,7 @@
 # emitted by the bundler from the upstream hex-string format into
 # decimal integers the SPA can hand directly to String.fromCodePoint.
 # favicon.ico (multi-resolution, ~34 KB) is original artwork by the
-# project author. Inkscape source kept at doc/pt700favicon.svg if you
+# project author. Inkscape source kept at doc/labelsis_favicon.svg if you
 # need to re-export.
 
 set(SPA_BUNDLE_DIR ${CMAKE_CURRENT_BINARY_DIR}/spa-bundle)
@@ -73,9 +73,8 @@ idf_component_register(
     SRCS "src/pt_app.c" "src/pt_led.c" "src/pt_dns.c"
     INCLUDE_DIRS "include"
     REQUIRES
-        pt_session
         pt_transport
-        pt_protocol
+        ql700_protocol
         esp_wifi
         esp_event
         esp_netif

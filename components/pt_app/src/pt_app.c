@@ -1,5 +1,5 @@
 /*
- * pt_app -- Wi-Fi + HTTP + transport glue. Owns:
+ * pt_app -- Wi-Fi + HTTP + QL-700 transport glue. Owns:
  *   - NVS-persisted Wi-Fi creds with first-boot fallback to compiled-in
  *   - SoftAP onboarding ("labelsis-setup" + setup page) when no creds
  *   - STA bring-up + transport open + mDNS + the HTTP API
@@ -9,6 +9,7 @@
 #include "pt_app.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -29,12 +30,9 @@
 
 #include "pt_dns.h"
 #include "pt_led.h"
-#include "pt_protocol.h"
 #include "ql700_status.h"
 #include "ql700_raster.h"
-#include "pt_session.h"
 #include "pt_transport.h"
-#include "pt_transport_mock.h"
 #include "pt_transport_usb_host.h"
 
 static const char *TAG = "pt_app";
@@ -304,7 +302,7 @@ static esp_err_t prescan_save_enabled(bool enabled)
 #define RESET_POLL_MS  50      /* GPIO sample period */
 
 /* True when the BOOT button has flipped the OTA gate open. Mirrors
- * the role of "printer in P-Lite" mode: while either is true, the
+ * the role of "printer in Editor Lite" mode: while either is true, the
  * /api/ota endpoint accepts uploads. Volatile because the button
  * task writes it and the HTTP handler thread reads it; bool is
  * word-sized atomic on Xtensa, so no further locking needed. */
@@ -583,134 +581,86 @@ static esp_err_t wifi_ap_up(const char *ssid)
 
 /* transport */
 
-static pt_transport_t            s_transport;
-static pt_transport_mock_t       s_mock;
-static pt_transport_usb_host_t  *s_usb;
-static const char               *s_transport_name = "waiting";
-static bool ql700_connected(void)
-{
-    return s_usb && pt_transport_usb_host_is_ql700(s_usb);
-}
+static pt_transport_t           s_transport;
+static pt_transport_usb_host_t *s_usb;
+static const char              *s_transport_state = "waiting";
+static SemaphoreHandle_t        s_printer_mutex;
 
-/* Forward decl: api_status reports the OTA gate state alongside
- * transport so the SPA's existing status poll can surface the OTA
- * panel. The function lives down with the OTA handlers. */
+#define PRINTER_LOCK(timeout_ms) \
+    (xSemaphoreTake(s_printer_mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
+#define PRINTER_UNLOCK() \
+    xSemaphoreGive(s_printer_mutex)
+
+/* Forward declaration: the status endpoint exposes whether OTA is
+ * currently unlocked (Editor Lite mode or the BOOT-button override). */
 static bool ota_gate_open(void);
 
-/* Forward decl: api_status / api_print etc. read this to short-circuit
- * with a "no printer attached" response when no real device is open. */
 static bool transport_ready(void)
 {
-    if (!s_transport.send || !s_transport.recv) return false;
-    /* For the USB host backend, the function pointers stay set after
-     * a DEV_GONE event -- only the underlying device flag flips. The
-     * mock transport has no s_usb so it falls through and the
-     * pointers are the truth. */
-    if (s_usb) return pt_transport_usb_host_alive(s_usb);
-    return true;
+    return s_usb && s_transport.send && s_transport.recv &&
+           pt_transport_usb_host_alive(s_usb);
 }
 
-/* Try once to open the USB host transport. Returns true on success
- * (transport now points at usb_host) OR if a P-Lite-mode PT-* was
- * detected (transport stays empty but s_transport_name is set so the
- * SPA can show a helpful message). The retry task uses the return
- * value to decide whether to keep polling. */
+/* Try to pair with the QL-700. Editor Lite mode is reported separately
+ * so the UI can explain why the printer interface is not available. */
 static bool transport_try_usb(uint32_t connect_timeout_ms)
 {
     pt_transport_usb_host_t *u = pt_transport_usb_host_open(connect_timeout_ms);
     if (u) {
-        /* Free the prior session struct (cable was unplugged or the
-         * slider was flipped to P-Lite); pt_transport_usb_host_close
-         * is safe on a struct whose underlying device is already
-         * gone -- it skips the interface_release / device_close
-         * steps that DEV_GONE already performed. */
         pt_transport_usb_host_t *prev = s_usb;
-        s_usb            = u;
-        s_transport      = pt_transport_usb_host_transport(s_usb);
-        s_transport_name = "usb_host";
+        s_usb = u;
+        s_transport = pt_transport_usb_host_transport(s_usb);
+        s_transport_state = "usb_host";
         if (prev) pt_transport_usb_host_close(prev);
-        ESP_LOGI(TAG, "transport: usb_host (PT-* attached)");
+        ESP_LOGI(TAG, "transport: QL-700 attached over USB");
         pt_led_set(PT_LED_READY);
         return true;
     }
-    if (pt_transport_usb_host_plite_seen()) {
-        memset(&s_transport, 0, sizeof s_transport);
-        s_transport_name = "plite";
-        return false;  /* keep polling -- user might flip the slider */
-    }
+
+    memset(&s_transport, 0, sizeof s_transport);
+    s_transport_state = pt_transport_usb_host_editor_lite_seen()
+        ? "editor_lite" : "waiting";
     return false;
 }
 
-/* Background monitor. Runs forever (single instance). Polls
- * transport_ready every TRANSPORT_POLL_MS; on every false->true or
- * true->false edge updates the status LED, and re-attempts a USB
- * attach whenever we're not ready. Replaces the old "self-deleting
- * retry task" -- that exited after the first successful pair, which
- * meant a subsequent unplug or P-Lite slider flip left the LED stuck
- * green and no auto-recovery happened on hot-plug. */
-#define TRANSPORT_POLL_MS  2000
+#define TRANSPORT_POLL_MS 2000
 
 static void transport_monitor_task(void *arg)
 {
     (void)arg;
     bool last_ready = transport_ready();
-    if (last_ready) pt_led_set(PT_LED_READY);
-    else            pt_led_set(PT_LED_USB_WAITING);
+    pt_led_set(last_ready ? PT_LED_READY : PT_LED_USB_WAITING);
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(TRANSPORT_POLL_MS));
-
         bool ready = transport_ready();
         if (ready != last_ready) {
             if (ready) {
-                ESP_LOGI(TAG, "transport: %s online", s_transport_name);
+                ESP_LOGI(TAG, "transport: QL-700 online");
                 pt_led_set(PT_LED_READY);
             } else {
-                ESP_LOGW(TAG, "transport: lost (now %s)", s_transport_name);
+                ESP_LOGW(TAG, "transport: QL-700 disconnected");
+                s_transport_state = "waiting";
                 pt_led_set(PT_LED_USB_WAITING);
             }
             last_ready = ready;
         }
-
-        /* Try to (re)attach when not ready. Short connect timeout so
-         * a missing printer doesn't make this loop stall and miss
-         * disconnect transitions. transport_try_usb is safe to call
-         * when no device is pending -- it just returns false. */
-        if (!ready) {
-            transport_try_usb(1500);
-        }
+        if (!ready) transport_try_usb(1500);
     }
 }
 
 static void transport_up(const pt_app_config_t *cfg)
 {
-    if (!cfg->use_usb_host) {
-        /* Dev / host-CMake / unit-test path. The mock is the only thing
-         * that makes sense without USB host hardware. */
-        s_transport      = pt_transport_mock_init(&s_mock);
-        s_transport_name = "mock";
-        ESP_LOGI(TAG, "transport: mock (use_usb_host=false)");
-        pt_led_set(PT_LED_READY);
-        return;
-    }
-    /* Real device. Try USB once with the user-configured timeout for
-     * a quick first-boot pair, then hand off to the monitor task
-     * which handles initial-pair retries, hot-plug, P-Lite recovery,
-     * and LED state for the lifetime of the boot. */
-    uint32_t to = cfg->usb_connect_timeout_ms ? cfg->usb_connect_timeout_ms : 5000;
-    if (transport_try_usb(to) && transport_ready()) {
-        /* attach succeeded; LED already set in transport_try_usb */
-    } else {
-        if (s_transport_name == NULL || strcmp(s_transport_name, "plite") != 0) {
-            s_transport_name = "waiting";
-        }
-        memset(&s_transport, 0, sizeof s_transport);
-        ESP_LOGW(TAG, "transport: no PT-* attached -- waiting; SPA usable for design");
+    uint32_t timeout = cfg->usb_connect_timeout_ms
+        ? cfg->usb_connect_timeout_ms : 5000;
+    if (!transport_try_usb(timeout)) {
+        ESP_LOGW(TAG, "transport: QL-700 not found -- waiting for USB attach");
     }
 
-    BaseType_t r = xTaskCreate(transport_monitor_task, "tx_mon", 4096,
-                               NULL, tskIDLE_PRIORITY + 1, NULL);
-    if (r != pdPASS) ESP_LOGW(TAG, "transport: monitor task create failed");
+    BaseType_t result = xTaskCreate(transport_monitor_task, "tx_mon", 4096,
+                                    NULL, tskIDLE_PRIORITY + 1, NULL);
+    if (result != pdPASS)
+        ESP_LOGW(TAG, "transport: monitor task creation failed");
 }
 
 /* HTTP API */
@@ -738,45 +688,7 @@ static esp_err_t cors_preflight(httpd_req_t *req)
     return httpd_resp_send(req, NULL, 0);
 }
 
-/* Serializes whole pt_session operations across HTTP worker threads.
- * pt_transport already mutexes individual send/recv pairs, but a print
- * is many recvs in a row (wait_print_done loops on status messages
- * looking for phase=printing) -- without a higher-level lock, a /api/
- * status poll fired by the SPA's 3 s timer can slot between two of
- * those recvs and consume the printer's lone phase=printing message,
- * making the print's wait loop time out even though the print is fine.
- *
- * Take this mutex around any pt_session call. Polls and prints
- * serialize cleanly; the SPA briefly stops refreshing during a print,
- * which is exactly what we want anyway. */
-static SemaphoreHandle_t s_session_mutex;
-
-#define SESSION_LOCK(timeout_ms) \
-    (xSemaphoreTake(s_session_mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE)
-#define SESSION_UNLOCK() \
-    xSemaphoreGive(s_session_mutex)
-
-static const char *err_kind(pt_err_t e)
-{
-    switch (e) {
-    case PT_OK: return "ok";
-    case PT_ERR_NO_MEDIA:       return "no_media";
-    case PT_ERR_COVER_OPEN:     return "cover_open";
-    case PT_ERR_CUTTER_JAM:     return "cutter_jam";
-    case PT_ERR_OVERHEAT:       return "overheat";
-    case PT_ERR_REPLACE_MEDIA:  return "replace_media";
-    case PT_ERR_WEAK_BATTERY:   return "weak_battery";
-    case PT_ERR_HIGH_VOLTAGE:   return "high_voltage";
-    case PT_ERR_MEDIA_MISMATCH: return "media_mismatch";
-    case PT_ERR_TIMEOUT:        return "timeout";
-    case PT_ERR_TRANSPORT:      return "transport";
-    default:                    return "internal";
-    }
-}
-
-/* A read-only QL-700 probe. ESC i S asks for status; it does not move media.
- * Do NOT use the PT session query/print routines with the QL protocol.
- */
+/* A read-only QL-700 probe. ESC i S asks for status; it does not move media. */
 static bool ql700_query_status(ql700_status_t *out)
 {
     static const uint8_t request[] = {0x1b, 0x69, 0x53};
@@ -801,22 +713,30 @@ static esp_err_t ql700_api_status(httpd_req_t *req, const char *ota_av)
 {
     if (!transport_ready()) {
         httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req,
-            "{\"ok\":false,\"printer\":\"QL-700\",\"error\":\"no_printer\"}");
+        char body[192];
+        int length = snprintf(body, sizeof body,
+            "{\"ok\":false,\"printer\":\"QL-700\",\"transport\":\"%s\",\"ota_available\":%s,\"error\":\"no_printer\"}",
+            s_transport_state, ota_av);
+        return httpd_resp_send(req, body, length);
     }
-    if (!SESSION_LOCK(500)) {
+    if (!PRINTER_LOCK(500)) {
         httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req,
-            "{\"ok\":false,\"printer\":\"QL-700\",\"error\":\"busy\"}");
+        char body[160];
+        int length = snprintf(body, sizeof body,
+            "{\"ok\":false,\"printer\":\"QL-700\",\"transport\":\"busy\",\"ota_available\":%s,\"error\":\"busy\"}",
+            ota_av);
+        return httpd_resp_send(req, body, length);
     }
     ql700_status_t st = {0};
     bool success = ql700_query_status(&st);
-    SESSION_UNLOCK();
+    PRINTER_UNLOCK();
     if (!success) {
         httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req,
-            "{\"ok\":false,\"printer\":\"QL-700\",\"usb_detected\":true,"
-            "\"error\":\"ql700_status_timeout_or_invalid\"}");
+        char body[192];
+        int length = snprintf(body, sizeof body,
+            "{\"ok\":false,\"printer\":\"QL-700\",\"transport\":\"usb_host\",\"usb_detected\":true,\"ota_available\":%s,\"error\":\"ql700_status_timeout_or_invalid\"}",
+            ota_av);
+        return httpd_resp_send(req, body, length);
     }
     const char *primary_error = ql700_primary_error(&st);
     const bool supported_media = st.media_type == 0x4a && st.media_width_mm == 62 && st.media_length_mm == 0;
@@ -845,22 +765,17 @@ static esp_err_t ql700_api_status(httpd_req_t *req, const char *ota_av)
     return httpd_resp_send(req, body, n);
 }
 
-/* Stage 3: deliberate, fixed-size QL-700 test print only.
- * Do not use PT print/feed/cut commands for the QL-700.
- * The web editor's /api/print remains disabled until the QL bitmap
- * format, other DK media, and completion status handling are added.
- */
+/* Transport callback used by the QL-700 raster encoder. */
 static bool ql700_send_to_usb(void *ctx, const uint8_t *data, size_t size)
 {
     const pt_transport_t *transport = (const pt_transport_t *)ctx;
     return pt_transport_send(transport, data, size) == (int)size;
 }
 
-/* Stage 4 -- Browser bitmap endpoint for QL-700 + DK-22205 only.
- * Body: 360..1500 rows, each 90 bytes, MSB-first head dots.
- * A full body is received before touching the printer, so a client
+/* QL-700 bitmap endpoint for DK-22205 62 mm continuous stock.
+ * Body: 360..1500 rows, each 90 bytes, MSB-first head dots. The full
+ * body is received before the printer is touched, so a client
  * disconnect during upload cannot leave a partial job in the printer.
- * This endpoint is deliberately separate from PT /api/print.
  */
 static esp_err_t api_ql700_bitmap_print(httpd_req_t *req)
 {
@@ -884,7 +799,7 @@ static esp_err_t api_ql700_bitmap_print(httpd_req_t *req)
         return httpd_resp_sendstr(req,
             "{\"ok\":false,\"error\":\"invalid_90_byte_raster_length\"}");
     }
-    if (!transport_ready() || !ql700_connected()) {
+    if (!transport_ready()) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_sendstr(req,
             "{\"ok\":false,\"error\":\"ql700_not_connected\"}");
@@ -907,7 +822,7 @@ static esp_err_t api_ql700_bitmap_print(httpd_req_t *req)
         }
         received += (size_t)n;
     }
-    if (!SESSION_LOCK(150000)) {
+    if (!PRINTER_LOCK(150000)) {
         free(bitmap);
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_sendstr(req,
@@ -919,7 +834,7 @@ static esp_err_t api_ql700_bitmap_print(httpd_req_t *req)
         st.media_length_mm == 0 && st.error1 == 0 &&
         st.error2 == 0 && st.phase_type == 0;
     if (!ready) {
-        SESSION_UNLOCK();
+        PRINTER_UNLOCK();
         free(bitmap);
         httpd_resp_set_status(req, "409 Conflict");
         return httpd_resp_sendstr(req,
@@ -931,7 +846,7 @@ static esp_err_t api_ql700_bitmap_print(httpd_req_t *req)
     const bool sent = ql700_send_bitmap_page_62mm(
         ql700_send_to_usb, &s_transport, bitmap, (uint16_t)rows);
     pt_led_set(transport_ready() ? PT_LED_READY : PT_LED_USB_WAITING);
-    SESSION_UNLOCK();
+    PRINTER_UNLOCK();
     free(bitmap);
     if (!sent) {
         httpd_resp_set_status(req, "502 Bad Gateway");
@@ -968,12 +883,12 @@ static esp_err_t api_ql700_testprint(httpd_req_t *req)
         return httpd_resp_sendstr(req,
             "{\"ok\":false,\"error\":\"unexpected_body\"}");
     }
-    if (!transport_ready() || !ql700_connected()) {
+    if (!transport_ready()) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_sendstr(req,
             "{\"ok\":false,\"error\":\"ql700_not_connected\"}");
     }
-    if (!SESSION_LOCK(150000)) {
+    if (!PRINTER_LOCK(150000)) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_sendstr(req,
             "{\"ok\":false,\"error\":\"busy\"}");
@@ -982,7 +897,7 @@ static esp_err_t api_ql700_testprint(httpd_req_t *req)
     ql700_status_t st = {0};
     bool received = ql700_query_status(&st);
     if (!received) {
-        SESSION_UNLOCK();
+        PRINTER_UNLOCK();
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_sendstr(req,
             "{\"ok\":false,\"error\":\"ql700_status_unavailable\"}");
@@ -993,7 +908,7 @@ static esp_err_t api_ql700_testprint(httpd_req_t *req)
     if (st.media_type != 0x4a || st.media_width_mm != 62 ||
         st.media_length_mm != 0 || st.error1 != 0 || st.error2 != 0 ||
         st.phase_type != 0) {
-        SESSION_UNLOCK();
+        PRINTER_UNLOCK();
         httpd_resp_set_status(req, "409 Conflict");
         return httpd_resp_sendstr(req,
             "{\"ok\":false,\"error\":\"requires_idle_62mm_continuous_roll\"}");
@@ -1002,7 +917,7 @@ static esp_err_t api_ql700_testprint(httpd_req_t *req)
     pt_led_set(PT_LED_PRINTING);
     bool sent = ql700_send_test_page_62mm(ql700_send_to_usb, &s_transport);
     pt_led_set(transport_ready() ? PT_LED_READY : PT_LED_USB_WAITING);
-    SESSION_UNLOCK();
+    PRINTER_UNLOCK();
 
     if (!sent) {
         /* Partial USB writes may mean printer needs power-cycling. Avoid
@@ -1022,402 +937,29 @@ static esp_err_t api_status(httpd_req_t *req)
 {
     cors_headers(req);
     httpd_resp_set_type(req, "application/json");
-    /* Tell the browser to close the TCP connection after this poll.
-     * Status is the highest-frequency endpoint; without this, HTTP/1.1
-     * keep-alive plus the SPA's 3 s polling cadence pins one socket
-     * per active tab on the device's small pool, leaving no room for
-     * a parallel multi-MB POST /api/ota when the user clicks Install.
-     * The cost (TCP setup per poll, ~10-20 ms on Wi-Fi) is invisible
-     * next to the 200+ ms wifi/server roundtrip. */
+    /* Status is polled frequently; close the socket after every poll so
+     * the small HTTP socket pool remains available for OTA uploads. */
     httpd_resp_set_hdr(req, "Connection", "close");
-    /* No printer attached yet (booted without USB device). Reply
-     * "ok=false" with the current transport name so the SPA can show
-     * "waiting" / "P-Lite" instead of a misleading green dot. The
-     * background transport_retry_task is polling in parallel; once a
-     * printer attaches the next status poll returns real data. */
-    /* ota_available is reported on every code path so the SPA can
-     * show / hide the OTA panel directly off /api/status without
-     * needing a separate /api/ota/status poll. The OTA gate has
-     * two openers (P-Lite mode, BOOT-button override); see
-     * ota_gate_open. */
-    const char *ota_av = ota_gate_open() ? "true" : "false";
-    if (ql700_connected()) {
-        return ql700_api_status(req, ota_av);
-    }
-    if (!transport_ready()) {
-        char body[160];
-        int n = snprintf(body, sizeof body,
-                         "{\"ok\":false,\"transport\":\"%s\","
-                         "\"ota_available\":%s,\"error\":\"no_printer\"}",
-                         s_transport_name, ota_av);
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_send(req, body, n);
-    }
-    /* Short wait -- a status poll that races with a long print should
-     * fail fast as "busy" rather than holding the connection while the
-     * print finishes. */
-    if (!SESSION_LOCK(500)) {
-        char body[120];
-        int n = snprintf(body, sizeof body,
-                         "{\"ok\":false,\"transport\":\"busy\","
-                         "\"ota_available\":%s,\"error\":\"busy\"}",
-                         ota_av);
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_send(req, body, n);
-    }
-    pt_status_t st;
-    pt_err_t err = pt_session_query_status(&s_transport, &st, NULL);
-    SESSION_UNLOCK();
-
-    char body[416];
-    int  n;
-    if (err != PT_OK) {
-        n = snprintf(body, sizeof body,
-                     "{\"ok\":false,\"transport\":\"%s\","
-                     "\"ota_available\":%s,\"error\":\"%s\"}",
-                     s_transport_name, ota_av, err_kind(err));
-        httpd_resp_set_status(req, "503 Service Unavailable");
-    } else {
-        n = snprintf(body, sizeof body,
-            "{\"ok\":true,"
-            "\"transport\":\"%s\","
-            "\"ota_available\":%s,"
-            "\"model\":%u,"
-            "\"media_width_mm\":%u,"
-            "\"media_type\":%u,"
-            "\"tape_color_id\":%u,"
-            "\"text_color_id\":%u,"
-            "\"error1\":%u,"
-            "\"error2\":%u,"
-            "\"status_type\":%u,"
-            "\"phase_type\":%u}",
-            s_transport_name, ota_av,
-            (unsigned)st.model,
-            (unsigned)st.media_width_mm,
-            (unsigned)st.media_type,
-            (unsigned)st.tape_color_id,
-            (unsigned)st.text_color_id,
-            (unsigned)st.error1,
-            (unsigned)st.error2,
-            (unsigned)st.status_type,
-            (unsigned)st.phase_type);
-    }
-    return httpd_resp_send(req, body, n);
+    const char *ota_available = ota_gate_open() ? "true" : "false";
+    return ql700_api_status(req, ota_available);
 }
 
-/* Read a header value as a boolean (case-insensitive "true"/"false"),
- * leaving *dst untouched if the header isn't present. */
-static void hdr_bool(httpd_req_t *req, const char *name, bool *dst)
-{
-    char v[16];
-    if (httpd_req_get_hdr_value_str(req, name, v, sizeof v) != ESP_OK) return;
-    if (strcasecmp(v, "true") == 0 || strcmp(v, "1") == 0) *dst = true;
-    else if (strcasecmp(v, "false") == 0 || strcmp(v, "0") == 0) *dst = false;
-}
-
-/* GET /api/info -- geometry + identity + non-printable margins. */
+/* GET /api/info -- firmware metadata, independent of printer connection. */
 static esp_err_t api_info(httpd_req_t *req)
 {
     cors_headers(req);
     httpd_resp_set_type(req, "application/json");
-    if (ql700_connected()) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req,
-            "{\"ok\":false,\"printer\":\"QL-700\",\"usb_detected\":true,\"error\":\"ql700_protocol_pending\"}");
-    }
-    /* Same short-circuit as api_status: nothing to query when there's
-     * no live transport. The SPA falls back to its built-in geometry
-     * defaults so label design keeps working. */
-    /* Firmware version always goes in the response, even on no-printer
-     * paths, so the SPA's About panel can display it without depending
-     * on the printer being attached. esp_app_get_description() reads
-     * the static app_desc structure -- cheap and never fails. */
     const esp_app_desc_t *app = esp_app_get_description();
-    const char           *ver = (app && app->version[0]) ? app->version : "";
-
-    if (!transport_ready()) {
-        char body[160];
-        int n = snprintf(body, sizeof body,
-                         "{\"ok\":false,\"transport\":\"%s\","
-                         "\"fw_version\":\"%s\",\"error\":\"no_printer\"}",
-                         s_transport_name, ver);
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_send(req, body, n);
-    }
-    if (!SESSION_LOCK(500)) {
-        char body[160];
-        int n = snprintf(body, sizeof body,
-                         "{\"ok\":false,\"transport\":\"busy\","
-                         "\"fw_version\":\"%s\",\"error\":\"busy\"}",
-                         ver);
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_send(req, body, n);
-    }
-    pt_status_t st;
-    pt_err_t err = pt_session_query_status(&s_transport, &st, NULL);
-    SESSION_UNLOCK();
-    if (err != PT_OK) {
-        char body[192];
-        int n = snprintf(body, sizeof body,
-                         "{\"ok\":false,\"transport\":\"%s\","
-                         "\"fw_version\":\"%s\",\"error\":\"%s\"}",
-                         s_transport_name, ver, err_kind(err));
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_send(req, body, n);
-    }
-
-    pt_tape_geometry_t g = {0};
-    bool have_geom = (pt_tape_geometry_tze(st.media_width_mm, &g) == PT_OK);
-    /* Per-side non-printable margin in 180-dpi dots: half the
-     * difference between physical tape width and the print area. */
-    unsigned offside = have_geom
-        ? (unsigned)((g.tape_width_dots - g.print_pins) / 2u) : 0;
-
-    char body[480];
-    int  n = snprintf(body, sizeof body,
-        "{\"ok\":true,"
-        "\"transport\":\"%s\","
-        "\"fw_version\":\"%s\","
-        "\"model\":%u,"
-        "\"media_width_mm\":%u,"
-        "\"media_type\":%u,"
-        "\"tape_color_id\":%u,"
-        "\"text_color_id\":%u,"
-        "\"geometry\":{"
-            "\"head_pins\":%u,"
-            "\"print_pins\":%u,"
-            "\"tape_width_dots\":%u,"
-            "\"left_margin_pins\":%u,"
-            "\"right_margin_pins\":%u,"
-            "\"non_printable_dots_per_side\":%u}}",
-        s_transport_name,
-        ver,
-        (unsigned)st.model,
-        (unsigned)st.media_width_mm,
-        (unsigned)st.media_type,
-        (unsigned)st.tape_color_id,
-        (unsigned)st.text_color_id,
-        (unsigned)(have_geom ? g.total_pins : 0),
-        (unsigned)(have_geom ? g.print_pins : 0),
-        (unsigned)(have_geom ? g.tape_width_dots : 0),
-        (unsigned)(have_geom ? g.left_margin_pins : 0),
-        (unsigned)(have_geom ? g.right_margin_pins : 0),
-        offside);
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_send(req, body, n);
-}
-
-/* POST /api/feed -- advance the tape by `dots` (default 100) without
- * printing. POST /api/cut -- issue a single cut at the current head
- * position. Both build a tiny one-page print job containing a single
- * zero raster row, with the relevant flags set, so the printer's
- * normal feed/cut path runs. */
-static esp_err_t feed_or_cut(httpd_req_t *req, bool do_cut, uint16_t dots)
-{
-    cors_headers(req);
-    httpd_resp_set_type(req, "application/json");
-    if (ql700_connected()) {
-        httpd_resp_set_status(req, "501 Not Implemented");
-        return httpd_resp_sendstr(req,
-            "{\"ok\":false,\"error\":\"ql700_print_not_implemented\"}");
-    }
-    /* No printer attached -- nothing to feed or cut. Refuse cleanly so
-     * the SPA's button can show the failure. */
-    if (!transport_ready()) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"no_printer\"}");
-    }
-    /* Wait the full session-lock window -- feed/cut still go through
-     * pt_session_print_raster (with a one-row zero job), so they need
-     * exclusive printer access for the duration. */
-    if (!SESSION_LOCK(150000)) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"busy\"}");
-    }
-
-    pt_session_options_t opts;
-    pt_session_options_default(&opts);
-    opts.compression  = PT_COMPRESSION_NONE;  /* avoid PackBits round-trip */
-    opts.auto_cut     = do_cut;
-    opts.no_chain_print = true;
-    opts.margin_dots  = do_cut ? 14 : dots;   /* feed = use margin to advance */
-
-    /* Single zero raster row = printable nothing; printer still feeds the
-     * configured margin and (optionally) cuts. */
-    static const uint8_t zero_row[16] = {0};
-    pt_err_t err = pt_session_print_raster(&s_transport, zero_row, 1,
-                                           0 /* trust loaded width */, &opts);
-    SESSION_UNLOCK();
-
-    char body[96];
-    int  n;
-    if (err == PT_OK) {
-        n = snprintf(body, sizeof body, "{\"ok\":true}");
-    } else {
-        n = snprintf(body, sizeof body,
-                     "{\"ok\":false,\"error\":\"%s\"}", err_kind(err));
+    const char *version = (app && app->version[0]) ? app->version : "";
+    char body[128];
+    int length = snprintf(body, sizeof body,
+                          "{\"ok\":true,\"printer\":\"QL-700\",\"fw_version\":\"%s\"}",
+                          version);
+    if (length < 0 || (size_t)length >= sizeof body) {
         httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"overflow\"}");
     }
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_send(req, body, n);
-}
-
-static esp_err_t api_cut(httpd_req_t *req)  { return feed_or_cut(req, true, 0); }
-
-static esp_err_t api_feed(httpd_req_t *req)
-{
-    /* Optional ?dots=N query parameter; default 100 (~14 mm @ 180 dpi). */
-    uint16_t dots = 100;
-    char query[32];
-    if (httpd_req_get_url_query_str(req, query, sizeof query) == ESP_OK) {
-        char val[16];
-        if (httpd_query_key_value(query, "dots", val, sizeof val) == ESP_OK) {
-            int v = atoi(val);
-            if (v > 0 && v < 2048) dots = (uint16_t)v;
-        }
-    }
-    return feed_or_cut(req, false, dots);
-}
-
-/* POST /api/print
- * Body  : raw 1-bit raster, n_rows x 16 bytes (the layout
- *         pt_bitmap_to_raster produces).
- * Headers (all optional):
- *   X-Tape-Width-Mm    require this width or fail (default: trust loaded)
- *   X-Auto-Cut         "true"|"false"   default true
- *   X-Chain            "true"|"false"   default false; true also disables
- *                                       auto-cut (PT-P700 specific, see
- *                                       pt_send --chain)
- *   X-Mirror           "true"|"false"   default false
- *   X-No-Compression   "true"|"false"   default false (= TIFF/PackBits)
- *   X-Margin-Dots      integer          default 14 (~ 2 mm @ 180 dpi)
- * Reply : application/json
- *   ok=true  : {"ok":true,"rows":N}
- *   ok=false : {"ok":false,"error":"<kind>"}    + 4xx/5xx status
- */
-#define MAX_PRINT_BODY (128 * 1024)
-
-static esp_err_t api_print(httpd_req_t *req)
-{
-    cors_headers(req);
-    httpd_resp_set_type(req, "application/json");
-    if (ql700_connected()) {
-        httpd_resp_set_status(req, "501 Not Implemented");
-        return httpd_resp_sendstr(req,
-            "{\"ok\":false,\"error\":\"ql700_print_not_implemented\"}");
-    }
-    /* Refuse with a clean error rather than reading the (potentially
-     * large) body just to drop it. The SPA can show "no printer
-     * attached" inline; once the user plugs in, the next print call
-     * just works. */
-    if (!transport_ready()) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"no_printer\"}");
-    }
-    int total = req->content_len;
-    if (total <= 0 || total % 16 != 0 || total > MAX_PRINT_BODY) {
-        httpd_resp_set_status(req, total > MAX_PRINT_BODY
-                              ? "413 Payload Too Large" : "400 Bad Request");
-        const char *what = (total <= 0)            ? "missing_body"
-                         : (total > MAX_PRINT_BODY) ? "too_large"
-                                                    : "length_not_aligned_16";
-        char body[96];
-        int n = snprintf(body, sizeof body,
-                         "{\"ok\":false,\"error\":\"%s\"}", what);
-        return httpd_resp_send(req, body, n);
-    }
-
-    uint8_t *buf = malloc((size_t)total);
-    if (!buf) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"oom\"}");
-    }
-
-    int rcvd = 0;
-    while (rcvd < total) {
-        int n = httpd_req_recv(req, (char *)(buf + rcvd), total - rcvd);
-        if (n <= 0) {
-            free(buf);
-            return ESP_FAIL;  /* connection closed */
-        }
-        rcvd += n;
-    }
-
-    pt_session_options_t opts;
-    pt_session_options_default(&opts);
-
-    char hbuf[16];
-    hdr_bool(req, "X-Auto-Cut", &opts.auto_cut);
-    hdr_bool(req, "X-Mirror",   &opts.mirror_print);
-    /* --chain implies no_chain_print=false AND auto_cut=false on PT-P700
-     * (see pt_send --chain). Apply the same coupling here. */
-    bool chain = false;
-    hdr_bool(req, "X-Chain", &chain);
-    if (chain) { opts.no_chain_print = false; opts.auto_cut = false; }
-
-    bool no_compress = false;
-    hdr_bool(req, "X-No-Compression", &no_compress);
-    if (no_compress) opts.compression = PT_COMPRESSION_NONE;
-
-    if (httpd_req_get_hdr_value_str(req, "X-Margin-Dots",
-                                    hbuf, sizeof hbuf) == ESP_OK) {
-        opts.margin_dots = (uint16_t)atoi(hbuf);
-    }
-    uint8_t width = 0;
-    if (httpd_req_get_hdr_value_str(req, "X-Tape-Width-Mm",
-                                    hbuf, sizeof hbuf) == ESP_OK) {
-        width = (uint8_t)atoi(hbuf);
-    }
-
-    size_t   n_rows = (size_t)total / 16;
-
-    /* Hold the lock across the entire job (encode + raster send +
-     * wait_print_done). Long enough for a 1 m label at PT-P700's
-     * ~30 mm/s -- print_timeout_ms (default 120 s) plus margin. */
-    if (!SESSION_LOCK(150000)) {
-        free(buf);
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"busy\"}");
-    }
-    pt_led_set(PT_LED_PRINTING);
-    pt_err_t err = pt_session_print_raster(&s_transport, buf,
-                                           n_rows, width, &opts);
-    SESSION_UNLOCK();
-    pt_led_set(transport_ready() ? PT_LED_READY : PT_LED_USB_WAITING);
-    free(buf);
-
-    char rbody[128];
-    int  rlen;
-    if (err == PT_OK) {
-        rlen = snprintf(rbody, sizeof rbody,
-                        "{\"ok\":true,\"rows\":%u}", (unsigned)n_rows);
-    } else {
-        rlen = snprintf(rbody, sizeof rbody,
-                        "{\"ok\":false,\"error\":\"%s\"}", err_kind(err));
-        switch (err) {
-        case PT_ERR_NO_MEDIA:
-        case PT_ERR_REPLACE_MEDIA:
-        case PT_ERR_COVER_OPEN:
-        case PT_ERR_MEDIA_MISMATCH:
-        case PT_ERR_CUTTER_JAM:
-            httpd_resp_set_status(req, "409 Conflict");
-            break;
-        case PT_ERR_OVERHEAT:
-        case PT_ERR_WEAK_BATTERY:
-        case PT_ERR_HIGH_VOLTAGE:
-            httpd_resp_set_status(req, "503 Service Unavailable");
-            break;
-        case PT_ERR_TIMEOUT:
-            httpd_resp_set_status(req, "504 Gateway Timeout");
-            break;
-        default:
-            httpd_resp_set_status(req, "500 Internal Server Error");
-        }
-    }
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_send(req, rbody, rlen);
+    return httpd_resp_send(req, body, length);
 }
 
 /* SPA assets embedded via EMBED_FILES in CMakeLists.txt. The text
@@ -1552,17 +1094,17 @@ static esp_err_t api_icon_json(httpd_req_t *req)
         icon_json_gz_start, icon_json_gz_end - icon_json_gz_start);
 }
 
-/* ----- OTA, gated on physical "printer in P-Lite mode" ----- *
+/* ----- OTA, gated on physical QL-700 Editor Lite mode ----- *
  *
  * Auth model: the printer's physical slider in EL position is the
  * gate. Anyone uploading a new firmware must have walked up to the
  * printer and slid the switch -- the same threat model as the BOOT-
  * button Wi-Fi reset, applied to a more discoverable user-facing
- * control. P-Lite already coincides with "printer cannot print", so
+ * control. Editor Lite already coincides with "printer cannot print", so
  * the OTA window is naturally a maintenance window.
  *
  * The window stays open as long as the slider stays in EL -- we
- * trust the user to slide back. If P-Lite ends mid-upload, we abort
+ * trust the user to slide back. If Editor Lite ends mid-upload, we abort
  * the in-flight write so a half-baked image never becomes the boot
  * target. esp_ota_end() validates SHA256 from the image header; we
  * additionally verify the new image's project_name is "labelsis"
@@ -1573,14 +1115,14 @@ static esp_err_t api_icon_json(httpd_req_t *req)
 
 #include "esp_ota_ops.h"
 
-static bool ota_plite_gate(void)
+static bool ota_editor_lite_gate(void)
 {
-    return s_transport_name && strcmp(s_transport_name, "plite") == 0;
+    return s_transport_state && strcmp(s_transport_state, "editor_lite") == 0;
 }
 
 static bool ota_gate_open(void)
 {
-    return ota_button_gate_active() || ota_plite_gate();
+    return ota_button_gate_active() || ota_editor_lite_gate();
 }
 
 static esp_err_t api_ota_status(httpd_req_t *req)
@@ -1595,10 +1137,10 @@ static esp_err_t api_ota_status(httpd_req_t *req)
      * actual gate that's open (so the user knows why), or both
      * options to open it when neither is engaged. */
     const char *reason;
-    if (ota_button_gate_active() && ota_plite_gate())     reason = "P-Lite mode + BOOT button gate";
+    if (ota_button_gate_active() && ota_editor_lite_gate())     reason = "Editor Lite mode + BOOT button gate";
     else if (ota_button_gate_active())                    reason = "BOOT button gate (hold 2-30 s + release to close)";
-    else if (ota_plite_gate())                            reason = "P-Lite mode";
-    else reason = "printer must be in P-Lite mode (slide switch to EL), "
+    else if (ota_editor_lite_gate())                            reason = "Editor Lite mode";
+    else reason = "printer must be in Editor Lite mode (slide switch to EL), "
                   "or hold the BOOT button 2-30 s and release (device must be online)";
     /* next_slot_state surfaces the bootloader's view of the inactive
      * slot -- "valid" / "invalid" / "aborted" tells the user (or a
@@ -2063,10 +1605,6 @@ static esp_err_t http_up(uint16_t port)
         .uri = "/api/info", .method = HTTP_GET,
         .handler = api_info, .user_ctx = NULL,
     };
-    static const httpd_uri_t print_route = {
-        .uri = "/api/print", .method = HTTP_POST,
-        .handler = api_print, .user_ctx = NULL,
-    };
     static const httpd_uri_t ql700_bitmap_route = {
         .uri = "/api/ql700/print", .method = HTTP_POST,
         .handler = api_ql700_bitmap_print, .user_ctx = NULL,
@@ -2074,14 +1612,6 @@ static esp_err_t http_up(uint16_t port)
     static const httpd_uri_t ql700_test_route = {
         .uri = "/api/ql700/testprint", .method = HTTP_POST,
         .handler = api_ql700_testprint, .user_ctx = NULL,
-    };
-    static const httpd_uri_t cut_route = {
-        .uri = "/api/cut", .method = HTTP_POST,
-        .handler = api_cut, .user_ctx = NULL,
-    };
-    static const httpd_uri_t feed_route = {
-        .uri = "/api/feed", .method = HTTP_POST,
-        .handler = api_feed, .user_ctx = NULL,
     };
     static const httpd_uri_t scan_route = {
         .uri = "/api/scan", .method = HTTP_GET,
@@ -2149,11 +1679,8 @@ static esp_err_t http_up(uint16_t port)
     };
     httpd_register_uri_handler(s_http, &status_route);
     httpd_register_uri_handler(s_http, &info_route);
-    httpd_register_uri_handler(s_http, &print_route);
     httpd_register_uri_handler(s_http, &ql700_test_route);
     httpd_register_uri_handler(s_http, &ql700_bitmap_route);
-    httpd_register_uri_handler(s_http, &cut_route);
-    httpd_register_uri_handler(s_http, &feed_route);
     httpd_register_uri_handler(s_http, &scan_route);
     httpd_register_uri_handler(s_http, &setup_route);
     httpd_register_uri_handler(s_http, &index_route);
@@ -2524,8 +2051,8 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
-    s_session_mutex = xSemaphoreCreateMutex();
-    if (!s_session_mutex) return ESP_ERR_NO_MEM;
+    s_printer_mutex = xSemaphoreCreateMutex();
+    if (!s_printer_mutex) return ESP_ERR_NO_MEM;
 
     /* Status LED first so the boot pattern is visible from the moment
      * power comes up, even if subsequent steps fail. */
