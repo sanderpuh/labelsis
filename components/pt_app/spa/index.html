@@ -462,6 +462,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <button id="lib-update" class="secondary" type="button" disabled data-i18n="lib.btn.update">update</button>
           <button id="lib-delete" class="secondary" type="button" disabled data-i18n="lib.btn.delete">delete</button>
           <button id="lib-clear"  class="secondary" type="button" data-i18n="lib.btn.new">new</button>
+          <button id="lib-download" class="secondary" type="button" data-i18n="lib.btn.download" title="save this design as a file">download</button>
+          <button id="lib-open" class="secondary" type="button" data-i18n="lib.btn.open" title="open a design file">open file…</button>
+          <input id="lib-file" type="file" accept=".json,application/json" hidden>
         </span>
       </div>
       <div class="canvas-viewport">
@@ -934,6 +937,8 @@ const STRINGS = {
     "panel.ota":               "Firmware update",
     "ota.help":                "OTA gate is open (printer in P-Lite mode, or BOOT button toggled). Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.",
     "btn.ota.upload":          "install",
+    "lib.btn.download":        "download",
+    "lib.btn.open":            "open file…",
     /* about.intro is rendered AFTER the project link in the markup
      * (the link sits outside the data-i18n span so applyI18n's
      * textContent assignment can't wipe its <a> tag). The i18n
@@ -3833,6 +3838,179 @@ function libClear() {
   libRefresh();
   redraw();
 }
+
+/* design files: one design = one file
+ *
+ * {format, version, name, saved, dpi, head, tape, canvas, printOpts,
+ *  elements}. The element list is the same body that goes into
+ * localStorage (runtime caches stripped). `dpi` exists so a file made
+ * on a 180-dpi layout still lands at the right physical size on a
+ * 300-dpi QL-700 layout: geometry is rescaled by currentDpi/dpi on
+ * import. Files without `dpi` are treated as legacy 180-dpi saves. */
+const DESIGN_FORMAT  = "labelsis-design";
+const DESIGN_VERSION = 1;
+const DESIGN_LEGACY_DPI = 180;
+
+function currentDpi() {
+  return ql700Layout() ? 300 : 180;
+}
+
+function designDoc() {
+  return {
+    format:  DESIGN_FORMAT,
+    version: DESIGN_VERSION,
+    name:    currentLabelName || "",
+    saved:   new Date().toISOString(),
+    dpi:     currentDpi(),
+    head:    HEAD_PX,
+    tape: {
+      type:     "continuous",
+      media:    ql700Layout() ? "DK-22205" : null,
+      widthMm:  ql700Layout() ? 62 : lastSeenTapeMm,
+      lengthMm: 0,
+    },
+    canvas: {
+      labelWidthMode: canvasOpts.labelWidthMode,
+      labelWidthMm:   canvasOpts.labelWidthMm,
+    },
+    printOpts: {
+      autoCut: document.getElementById("print-auto-cut").checked,
+      mirror:  document.getElementById("print-mirror").checked,
+      chain:   document.getElementById("print-chain").checked,
+    },
+    elements: elements.map(stripCached),
+  };
+}
+
+/* Filename from the design name; keeps diacritics/spaces, drops the
+ * characters Windows/macOS refuse. */
+function designFilename(name) {
+  const base = (name || "label").trim()
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .slice(0, 80) || "label";
+  return `${base}.json`;
+}
+
+function downloadDesign() {
+  if (!elements.length) { log("nothing to download - the design is empty"); return; }
+  const doc  = designDoc();
+  const text = JSON.stringify(doc, null, 2);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  a.download = designFilename(doc.name);
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 0);
+  log(`downloaded ${a.download}`, true);
+}
+
+/* Scale a parsed element from its authored dpi to the current one.
+ * All lengths in an element are printer dots at the authoring dpi. */
+function scaleElementForDpi(el, ratio) {
+  const len = v => (typeof v === "number" && isFinite(v)) ? Math.round(v * ratio) : v;
+  if (isFinite(el.x)) el.x = len(el.x);
+  if (isFinite(el.y)) el.y = len(el.y);
+  if (el.type === "text") {
+    el.size = Math.max(4, len(el.size) || 4);
+  } else if (el.type === "image") {
+    el.h = Math.max(1, len(el.h) || 1);
+  } else if (el.type === "barcode") {
+    el.h    = Math.max(1,  len(el.h) || 1);
+    el.size = Math.max(1,  Math.round((el.size || 2) * ratio));
+  } else if (el.type === "qr") {
+    el.size = Math.max(1,  Math.round((el.size || 3) * ratio));
+  } else if (el.type === "rect") {
+    el.w      = Math.max(1, len(el.w) || 1);
+    el.h      = Math.max(1, len(el.h) || 1);
+    el.module = Math.max(1, Math.round((el.module || 1) * ratio));
+  } else if (el.type === "icon") {
+    el.size = Math.max(1, len(el.size) || 1);
+  }
+  return el;
+}
+
+/* Apply a parsed design file. Returns an error string, or null. */
+function applyDesignDoc(doc, filename) {
+  /* Bare array = a library entry or an old session snapshot. */
+  let list, dpi = DESIGN_LEGACY_DPI, docName = "", canvas = null, printOpts = null;
+  if (Array.isArray(doc)) {
+    list = doc;
+  } else if (doc && typeof doc === "object" && Array.isArray(doc.elements)) {
+    if (doc.format && doc.format !== DESIGN_FORMAT)
+      return "not a LabelSis design file";
+    if (doc.version && doc.version > DESIGN_VERSION)
+      return `file is from a newer version (v${doc.version}) - update the firmware`;
+    list = doc.elements;
+    if (isFinite(doc.dpi) && doc.dpi > 0) dpi = doc.dpi;
+    docName    = typeof doc.name === "string" ? doc.name.trim() : "";
+    canvas     = doc.canvas && typeof doc.canvas === "object" ? doc.canvas : null;
+    printOpts  = doc.printOpts && typeof doc.printOpts === "object" ? doc.printOpts : null;
+  } else {
+    return "no label elements in this file";
+  }
+  if (!list.length) return "the design in this file is empty";
+
+  const ratio = currentDpi() / dpi;
+  const scaled = list
+    .filter(d => d && ["text", "image", "barcode", "qr", "rect", "icon"].includes(d.type))
+    .map(d => (ratio === 1 ? d : scaleElementForDpi(d, ratio)));
+  if (!scaled.length) return "no usable elements in this file";
+
+  pushUndo();
+  restoreFromJSON(JSON.stringify(scaled));
+
+  if (canvas) {
+    if (canvas.labelWidthMode === "auto" || canvas.labelWidthMode === "fixed")
+      canvasOpts.labelWidthMode = canvas.labelWidthMode;
+    if (isFinite(canvas.labelWidthMm))
+      canvasOpts.labelWidthMm = canvas.labelWidthMm;
+    saveCanvasOpts();
+    const $mode = document.getElementById("opt-len-mode");
+    const $mm   = document.getElementById("opt-len-mm");
+    if ($mode) $mode.value = canvasOpts.labelWidthMode;
+    if ($mm)   { $mm.value = canvasOpts.labelWidthMm; $mm.disabled = canvasOpts.labelWidthMode !== "fixed"; }
+  }
+  if (printOpts) {
+    const set = (id, key) => {
+      if (typeof printOpts[key] !== "boolean") return;
+      const box = document.getElementById(id);
+      if (box && !box.disabled) box.checked = printOpts[key];
+    };
+    set("print-mirror", "mirror");
+    set("print-chain",  "chain");
+  }
+
+  currentLabelName = docName;
+  syncPropsPanel();
+  renderLayerList();
+  libRefresh();
+  redraw();
+
+  const notes = [];
+  if (ratio !== 1) notes.push(`rescaled from ${dpi} dpi`);
+  log(`opened ${filename}${notes.length ? " (" + notes.join(", ") + ")" : ""}`, true);
+  return null;
+}
+
+document.getElementById("lib-download").addEventListener("click", downloadDesign);
+document.getElementById("lib-open").addEventListener("click", () => {
+  document.getElementById("lib-file").click();
+});
+document.getElementById("lib-file").addEventListener("change", async e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";           /* allow reopening the same file */
+  if (!f) return;
+  let doc;
+  try {
+    doc = JSON.parse(await f.text());
+  } catch (err) {
+    log(`could not read ${f.name}: not valid JSON`, false);
+    return;
+  }
+  const err = applyDesignDoc(doc, f.name);
+  if (err) log(`could not open ${f.name}: ${err}`, false);
+});
 
 /* duplicate selected */
 function duplicateSelected() {
