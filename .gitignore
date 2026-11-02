@@ -49,3 +49,10 @@ external/
 # PlatformIO / ESP-IDF generated files
 /build-log.txt
 /sdkconfig.ql700
+
+# Optional local firmware fonts; do not inadvertently publish font binaries.
+/components/pt_app/spa/fonts/custom/*.ttf
+/components/pt_app/spa/fonts/custom/*.TTF
+
+# Local QL-700 test image
+/tools/test-image.jpg

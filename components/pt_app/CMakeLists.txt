@@ -40,6 +40,16 @@ set(SPA_BUNDLE_INPUTS
     ${LABELSIS_ICON}
     ${CMAKE_SOURCE_DIR}/scripts/build_spa_assets.py
 )
+# labelsis-fonts-combined-v0.7: optional TTFs as SPA build dependencies.
+# A newly added or removed font triggers CMake regeneration; edited bytes
+# trigger the normal asset builder. No font files are required to be present.
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+    file(GLOB LABELSIS_CUSTOM_TTFS CONFIGURE_DEPENDS
+         "${CMAKE_CURRENT_SOURCE_DIR}/spa/fonts/custom/*.ttf"
+         "${CMAKE_CURRENT_SOURCE_DIR}/spa/fonts/custom/*.TTF")
+    list(APPEND SPA_BUNDLE_INPUTS ${LABELSIS_CUSTOM_TTFS})
+endif()
+list(APPEND SPA_BUNDLE_INPUTS ${CMAKE_SOURCE_DIR}/scripts/bundled_fonts.py)
 # ESP-IDF processes this CMakeLists twice: once in script mode (just
 # to extract REQUIRES) where add_custom_command isn't allowed, and
 # once in full mode to actually build. The guard skips the recipe

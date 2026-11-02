@@ -38,6 +38,7 @@ Usage:
 """
 
 import argparse
+from bundled_fonts import embed_bundled_fonts  # labelsis-fonts-combined-v0.7
 import base64
 import gzip
 import json
@@ -138,6 +139,7 @@ def main():
 
     bundled = inline_qrcode(index_html, qrcode_js)
     bundled = inline_icon(bundled, icon_bytes)
+    bundled = embed_bundled_fonts(bundled, args.spa_dir)
     write_pair(args.output_dir, "index.html",          bundled.encode("utf-8"))
     write_pair(args.output_dir, "setup.html",          setup_html.encode("utf-8"))
     write_pair(args.output_dir, "material-icons.json", icons_json.encode("utf-8"))

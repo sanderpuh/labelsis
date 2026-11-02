@@ -17,6 +17,7 @@ conditions (cover open, no media, different tape size, etc.).
 """
 
 import argparse
+from bundled_fonts import embed_bundled_fonts  # labelsis-fonts-combined-v0.7
 import json
 import os
 import sys
@@ -153,7 +154,16 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
 
         if path in ("/", "/index.html"):
-            self._send_file(os.path.join(SPA_DIR, "index.html"), "text/html")
+            # Serve bundled font metadata in the offline editor.
+            with open(os.path.join(SPA_DIR, "index.html"), encoding="utf-8") as f:
+                html = embed_bundled_fonts(f.read(), SPA_DIR)
+            payload = html.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(payload)
             return
 
         if path == "/qrcode.min.js":

@@ -575,6 +575,13 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
             <div id="font-list" class="font-list" role="listbox"></div>
           </div>
         </div>
+        <!-- labelsis-fonts-combined-v0.7 -->
+        <div class="row">
+          <label>local fonts</label>
+          <button id="font-discover-local" class="secondary" type="button"
+                  title="Ask permission to list fonts installed on this computer">Load installed fonts</button>
+          <span id="font-discover-status" class="muted" aria-live="polite"></span>
+        </div>
         <div class="row">
           <label data-i18n="field.style">style</label>
           <button id="text-bold"      class="secondary text-style" type="button" aria-pressed="false" aria-label="bold"          title="bold (Ctrl+B)">B</button>
@@ -3003,6 +3010,7 @@ document.getElementById("ql700-layout").addEventListener("change", ev => {
   redraw();
 });
 async function postPrint() {
+  labelSisCheckFontsForPrint();
   const isQl = printer?.printer === "QL-700";
   const c    = document.getElementById("preview");
   redraw(true);              /* clean canvas: elements only */
@@ -4042,7 +4050,7 @@ function syncPropsPanel() {
     if (el.strike)    decos.push("line-through");
     const fDeco    = decos.length ? decos.join(" ") : "none";
     const $trigger = document.getElementById("font-trigger");
-    $trigger.textContent           = family;
+    $trigger.textContent           = labelSisFontDisplayName(family);
     $trigger.style.fontFamily      = fontFamilyCSS(family);
     $trigger.style.fontWeight      = fWeight;
     $trigger.style.fontStyle       = fStyle;
@@ -4295,6 +4303,27 @@ function flipBy(axis) {
 document.getElementById("flip-h").addEventListener("click", () => flipBy("h"));
 document.getElementById("flip-v").addEventListener("click", () => flipBy("v"));
 
+/* labelsis-fonts-combined-v0.7: installed system fonts.
+ * This code only requests font *metadata* after the user clicks the button.
+ * No installed font files are uploaded or stored in the ESP32. */
+const LABELSIS_LOCAL_FONT_FAMILIES = new Set();
+function labelSisCheckFontsForPrint() {
+  const unresolved = [...new Set(elements
+    .filter(el => el.type === "text" && el.fontFamily)
+    .map(el => el.fontFamily))]
+    .filter(f => !FONTS.includes(f) && !LABELSIS_LOCAL_FONT_FAMILIES.has(f));
+  if (unresolved.length) {
+    throw new Error("Unknown local font: " + unresolved.join(", ") +
+      ". Click Load installed fonts on this computer, or choose a bundled font.");
+  }
+}
+
+/* LabelSis font UI v0.7.1: remove "Bundled:" in displayed labels only.
+ * Keep the internal family name for saved-design compatibility. */
+function labelSisFontDisplayName(family) {
+  return typeof family === "string" && family.startsWith("Bundled: ")
+    ? family.slice("Bundled: ".length) : family;
+}
 /* font picker + bold/italic/underline/strike */
 (function wireTextStyle() {
   const $trigger = document.getElementById("font-trigger");
@@ -4309,7 +4338,7 @@ document.getElementById("flip-v").addEventListener("click", () => flipBy("v"));
     row.dataset.font = f;
     row.style.fontFamily = fontFamilyCSS(f);
     row.innerHTML   = `<span class="name"></span><span class="sample"></span>`;
-    row.querySelector(".name").textContent   = f;
+    row.querySelector(".name").textContent   = labelSisFontDisplayName(f);
     row.querySelector(".sample").textContent = FONT_SAMPLE;
     row.addEventListener("click", () => {
       selectFont(f);
@@ -4317,6 +4346,70 @@ document.getElementById("flip-v").addEventListener("click", () => flipBy("v"));
     });
     $list.appendChild(row);
   }
+
+  /* labelsis-fonts-combined-v0.7: append available fonts on demand. */
+  const $localBtn = document.getElementById("font-discover-local");
+  const $localStatus = document.getElementById("font-discover-status");
+  function addLocalFontRow(f) {
+    if ([...$list.querySelectorAll(".font-row")].some(row => row.dataset.font === f)) return;
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "font-row";
+    row.dataset.font = f;
+    row.style.fontFamily = fontFamilyCSS(f);
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = f;
+    const sample = document.createElement("span");
+    sample.className = "sample";
+    sample.textContent = FONT_SAMPLE;
+    row.append(name, sample);
+    row.addEventListener("click", () => {
+      selectFont(f);
+      closeFontList();
+    });
+    $list.appendChild(row);
+  }
+  if (!window.isSecureContext) {
+    $localStatus.textContent = "Installed fonts need localhost or HTTPS";
+    $localBtn.disabled = true;
+  } else if (typeof window.queryLocalFonts !== "function") {
+    $localStatus.textContent = "Not supported in this browser";
+    $localBtn.disabled = true;
+  }
+  $localBtn.addEventListener("click", async () => {
+    if (typeof window.queryLocalFonts !== "function" || !window.isSecureContext) return;
+    $localBtn.disabled = true;
+    $localStatus.textContent = "Requesting font access…";
+    try {
+      /* Must be invoked directly inside the click handler for permission. */
+      const available = await window.queryLocalFonts();
+      const families = [...new Set(available.map(font => String(font.family || "").trim()))]
+        .filter(f => f.length > 0 && f.length <= 128 &&
+          !/["\\\x00-\x1f\x7f]/.test(f))
+        .sort((a, b) => a.localeCompare(b));
+      for (const family of families) {
+        LABELSIS_LOCAL_FONT_FAMILIES.add(family);
+        if (!FONTS.includes(family)) addLocalFontRow(family);
+      }
+      $localStatus.textContent = families.length
+        ? `${families.length} installed font families (open the font picker)`
+        : "Browser returned no installed fonts";
+      redraw();
+    } catch (err) {
+      console.error("LabelSis local font access:", err);
+      if (err && err.name === "NotAllowedError") {
+        $localStatus.textContent = "Font permission denied — check browser site settings";
+      } else if (err && err.name === "SecurityError") {
+        $localStatus.textContent = "Font access blocked by browser security or policy";
+      } else {
+        $localStatus.textContent = "Font access failed (" +
+          String((err && err.name) || "Error") + "): " + String((err && err.message) || err);
+      }
+    } finally {
+      $localBtn.disabled = false;
+    }
+  });
 
   function openFontList() {
     $list.classList.add("open");
