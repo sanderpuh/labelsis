@@ -107,6 +107,35 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 }
 .tpl-vars dt, .tpl-vars dd { margin:0; }
 .tpl-vars dt code { font-size:.8rem; white-space:nowrap; }
+/* Shipping-label import is a collapsible sibling of Template & CSV data. */
+#shipping-import-panel > summary { cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+.shipping-import-content { margin-top:.75rem; }
+.shipping-pdf-preview { margin-top:.65rem; padding:.5rem; border:1px solid var(--line); border-radius:4px; background:#fff; overflow:auto; }
+.shipping-pdf-stage { position:relative; width:max-content; max-width:100%; margin:72px auto; user-select:none; }
+#shipping-pdf-canvas { display:block; max-width:100%; height:auto; pointer-events:none; }
+.shipping-pdf-select { position:absolute; inset:0; cursor:crosshair; touch-action:none; }
+.shipping-pdf-crop-rect { display:none; position:absolute; border:2px solid #0969da; background:rgba(9,105,218,.14); box-shadow:0 0 0 1px rgba(255,255,255,.85); pointer-events:auto; cursor:move; touch-action:none; overflow:visible; }
+.shipping-crop-handle { position:absolute; z-index:3; width:12px; height:12px; border:2px solid #0969da; border-radius:2px; background:#fff; transform:translate(-50%,-50%); touch-action:none; }
+.shipping-crop-handle[data-handle="nw"], .shipping-crop-handle[data-handle="se"] { cursor:nwse-resize; }
+.shipping-crop-handle[data-handle="ne"], .shipping-crop-handle[data-handle="sw"] { cursor:nesw-resize; }
+.shipping-crop-handle[data-handle="n"], .shipping-crop-handle[data-handle="s"] { cursor:ns-resize; }
+.shipping-crop-handle[data-handle="e"], .shipping-crop-handle[data-handle="w"] { cursor:ew-resize; }
+.shipping-crop-handle[data-handle="nw"] { left:0; top:0; }
+.shipping-crop-handle[data-handle="n"] { left:50%; top:0; }
+.shipping-crop-handle[data-handle="ne"] { left:100%; top:0; }
+.shipping-crop-handle[data-handle="e"] { left:100%; top:50%; }
+.shipping-crop-handle[data-handle="se"] { left:100%; top:100%; }
+.shipping-crop-handle[data-handle="s"] { left:50%; top:100%; }
+.shipping-crop-handle[data-handle="sw"] { left:0; top:100%; }
+.shipping-crop-handle[data-handle="w"] { left:0; top:50%; }
+.shipping-pdf-split-band { position:absolute; z-index:1; left:0; right:0; top:50%; height:0; transform:translateY(-50%); box-sizing:border-box; background:rgba(245,158,11,.24); border-top:1px dashed #b45309; border-bottom:1px dashed #b45309; pointer-events:none; }
+.shipping-split-tools { margin-top:.75rem; padding-top:.7rem; border-top:1px solid var(--line); }
+.shipping-split-help { margin:.4rem 0 .65rem; font-size:.8rem; color:var(--muted); }
+.shipping-split-previews { display:grid; grid-template-columns:1fr; gap:.65rem; }
+.shipping-split-card { min-width:0; padding:.55rem; border:1px solid var(--line); border-radius:4px; background:var(--panel); }
+.shipping-split-card-header { display:flex; align-items:center; justify-content:space-between; gap:.5rem; margin-bottom:.4rem; font-size:.82rem; }
+.shipping-split-card canvas { display:block; width:100%; height:auto; background:#fff; border:1px solid var(--line); }
+.shipping-split-print-row { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin-top:.75rem; }
 .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:1rem; }
 .panel h2 { margin:0 0 .5rem; font-size:.85rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
 /* Inline panel header: the h2 sits next to the label-library
@@ -422,6 +451,8 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <dd>MIT - © 2012 davidshimjs</dd>
         <dt><a href="https://github.com/MultiMote/niimblue" target="_blank" rel="noopener">niimblue</a></dt>
         <dd>MIT - © 2024 MultiMote (canvas/barcode/dither algorithms ported)</dd>
+        <dt><a href="https://github.com/mozilla/pdf.js" target="_blank" rel="noopener">PDF.js</a></dt>
+        <dd>Apache-2.0 - © Mozilla and contributors (loaded from jsDelivr at runtime)</dd>
       </dl>
     </div>
     <div class="panel">
@@ -784,6 +815,83 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <input id="csv-file" type="file" accept=".csv,.tsv,text/csv,text/plain,text/tab-separated-values" hidden>
       </div>
     </details>
+
+    <details class="panel" id="shipping-import-panel">
+      <summary style="cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em;" data-i18n="shipping.panel.title">Shipping label</summary>
+      <div class="shipping-import-content">
+        <div class="row">
+          <button id="shipping-label-import" class="secondary" type="button"
+                  data-i18n="shipping.import.button"
+                  data-i18n-attr="title:shipping.import.title"
+                  title="Select a shipping label PDF">Import shipping label</button>
+          <input id="shipping-label-file" type="file" accept=".pdf,application/pdf" hidden>
+          <span id="shipping-label-import-status" class="muted" aria-live="polite"
+                data-i18n="shipping.import.none">No shipping label selected</span>
+        </div>
+        <div id="shipping-pdf-controls" class="row" style="margin-top:.65rem;" hidden>
+          <button id="shipping-page-prev" class="secondary" type="button" data-i18n="shipping.page.prev">Previous</button>
+          <span id="shipping-page-info" class="muted" aria-live="polite"></span>
+          <button id="shipping-page-next" class="secondary" type="button" data-i18n="shipping.page.next">Next</button>
+          <span class="spacer"></span>
+          <button id="shipping-crop-reset" class="secondary" type="button" data-i18n="shipping.crop.reset" hidden>Clear selection</button>
+        </div>
+        <div id="shipping-pdf-preview" class="shipping-pdf-preview" hidden>
+          <div id="shipping-pdf-stage" class="shipping-pdf-stage">
+            <canvas id="shipping-pdf-canvas" aria-label="PDF page preview"></canvas>
+            <div id="shipping-pdf-select" class="shipping-pdf-select" aria-label="Drag to select the shipping label area">
+              <div id="shipping-pdf-crop-rect" class="shipping-pdf-crop-rect">
+                <div id="shipping-pdf-split-band" class="shipping-pdf-split-band"></div>
+                <span class="shipping-crop-handle" data-shipping-handle data-handle="nw" aria-label="Resize top left"></span>
+                <span class="shipping-crop-handle" data-shipping-handle data-handle="n" aria-label="Resize top"></span>
+                <span class="shipping-crop-handle" data-shipping-handle data-handle="ne" aria-label="Resize top right"></span>
+                <span class="shipping-crop-handle" data-shipping-handle data-handle="e" aria-label="Resize right"></span>
+                <span class="shipping-crop-handle" data-shipping-handle data-handle="se" aria-label="Resize bottom right"></span>
+                <span class="shipping-crop-handle" data-shipping-handle data-handle="s" aria-label="Resize bottom"></span>
+                <span class="shipping-crop-handle" data-shipping-handle data-handle="sw" aria-label="Resize bottom left"></span>
+                <span class="shipping-crop-handle" data-shipping-handle data-handle="w" aria-label="Resize left"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p id="shipping-crop-help" class="muted" style="margin:.65rem 0 0;" data-i18n="shipping.crop.help" hidden>Drag over the page to select the shipping-label area. Drag again to replace the selection.</p>
+        <p id="shipping-crop-size" class="muted" style="margin:.4rem 0 0;" aria-live="polite" hidden></p>
+        <div id="shipping-split-tools" class="shipping-split-tools" hidden>
+          <div class="row" style="align-items:center;">
+            <label for="shipping-split-overlap" data-i18n="shipping.split.overlap">Overlap on print</label>
+            <input id="shipping-split-overlap" type="number" min="0" max="20" step="0.5" value="3" inputmode="decimal" style="width:5.25rem;">
+            <span class="muted" data-i18n="shipping.split.unit">mm</span>
+          </div>
+          <p class="shipping-split-help" data-i18n="shipping.split.help">The selected area is split horizontally at its midpoint. Both halves are fitted to the 58.9 mm printable width of the DK-22205 62 mm roll; overlap is measured on the finished print.</p>
+          <div class="shipping-split-previews">
+            <div class="shipping-split-card">
+              <div class="shipping-split-card-header">
+                <strong data-i18n="shipping.split.top">Label 1 — top half</strong>
+                <span id="shipping-split-top-size" class="muted"></span>
+              </div>
+              <canvas id="shipping-split-top" aria-label="Top shipping label half preview"></canvas>
+            </div>
+            <div class="shipping-split-card">
+              <div class="shipping-split-card-header">
+                <strong data-i18n="shipping.split.bottom">Label 2 — bottom half</strong>
+                <span id="shipping-split-bottom-size" class="muted"></span>
+              </div>
+              <canvas id="shipping-split-bottom" aria-label="Bottom shipping label half preview"></canvas>
+            </div>
+          </div>
+          <p id="shipping-output-resolution" class="muted" style="margin:.45rem 0 0; font-size:.78rem;" aria-live="polite" hidden></p>
+          <div class="shipping-split-print-row">
+            <button id="shipping-print" type="button" data-i18n="shipping.print.button" disabled>Print both halves</button>
+            <span id="shipping-print-status" class="muted" aria-live="polite" data-i18n="shipping.print.ready">Ready when the QL-700 is connected.</span>
+          </div>
+          <div class="shipping-split-print-row">
+            <button id="shipping-export-pdf" class="secondary" type="button"
+                    data-i18n="shipping.export.pdf.button" disabled>Export split labels to PDF</button>
+            <span id="shipping-export-pdf-status" class="muted" aria-live="polite"
+                  data-i18n="shipping.export.pdf.ready">Creates a two-page PDF for DK-22205 62 mm continuous media. In Windows, print at Actual size (100%), not Fit to page.</span>
+          </div>
+        </div>
+      </div>
+    </details>
    </div><!-- /col-right -->
   </section>
 
@@ -919,6 +1027,44 @@ const STRINGS = {
     "lib.btn.export.title":     "export this design as a JSON file",
     "lib.btn.import":          "import",
     "lib.btn.import.title":     "import a design from a JSON file",
+    "shipping.import.button":  "Import shipping label",
+    "shipping.import.title":   "Select a shipping label PDF",
+    "shipping.import.none":    "No shipping label selected",
+    "shipping.panel.title":    "Shipping label",
+    "shipping.loading":        "Loading PDF...",
+    "shipping.page":           "Page",
+    "shipping.page.prev":      "Previous",
+    "shipping.page.next":      "Next",
+    "shipping.crop.reset":     "Clear selection",
+    "shipping.crop.help":      "Drag over the page to select the shipping-label area. Drag inside the box to move it; use the corner and edge handles to resize. Extend the box beyond the page to add white space.",
+    "shipping.crop.none":      "No crop area selected",
+    "shipping.crop.outside":   "The crop is completely outside the PDF page. Move it so it includes part of the page.",
+    "shipping.crop.size":      "Selected area: {width} × {height} mm",
+    "shipping.split.overlap":  "Overlap on print",
+    "shipping.split.unit":     "mm",
+    "shipping.split.help":     "The selected area is split horizontally at its midpoint. Both halves are fitted to the 58.9 mm printable width of the DK-22205 62 mm roll; overlap is measured on the finished print.",
+    "shipping.split.top":      "Label 1 — top half",
+    "shipping.split.bottom":   "Label 2 — bottom half",
+    "shipping.output.resolution": "Final output: {width} × {height} px per half at {dpi} DPI. Rendered from the original PDF; the on-screen preview is scaled.",
+    "shipping.output.tooLarge": "The selected area is too large for high-resolution output ({width} × {height} pixels). Reduce the crop size and try again.",
+    "shipping.output.renderCancelled": "High-resolution rendering was cancelled. Please try again.",
+    "shipping.output.rendering": "Rendering both halves from the original PDF at {dpi} DPI...",
+    "shipping.print.button":   "Print both halves",
+    "shipping.print.ready":    "Ready to print both halves.",
+    "shipping.print.select":   "Select or adjust the shipping-label area first.",
+    "shipping.print.offline":  "Connect a ready QL-700 with DK-22205 62 mm continuous tape.",
+    "shipping.print.confirm":  "Print both shipping-label halves? Label 1 prints first, then label 2. They will overlap by {overlap} mm when joined.",
+    "shipping.print.sending":  "Printing shipping-label half {half} of 2...",
+    "shipping.print.done":     "Both shipping-label halves were sent to the printer.",
+    "shipping.print.partial":  "Label 1 was sent, but label 2 failed: {error}. Check the printer before retrying.",
+    "shipping.print.error":    "Could not print shipping label: {error}",
+    "shipping.print.tooShort": "Shipping-label half is too short for the QL-700 raster endpoint (minimum 30.5 mm).",
+    "shipping.print.tooLong":  "Shipping-label half is too long for the QL-700 raster endpoint (maximum 127 mm).",
+    "shipping.export.pdf.button": "Export split labels to PDF",
+    "shipping.export.pdf.ready":  "Creates a two-page PDF for DK-22205 62 mm continuous media. In Windows, print at Actual size (100%), not Fit to page.",
+    "shipping.export.pdf.preparing": "Rendering the selected area from the original PDF at print resolution and preparing the two-page PDF...",
+    "shipping.export.pdf.done":   "PDF exported. Print on DK-22205 62 mm continuous media using Actual size (100%), not Fit to page.",
+    "shipping.export.pdf.error":  "Could not export shipping-label PDF: {error}",
     /* about.intro is rendered AFTER the project link in the markup
      * (the link sits outside the data-i18n span so applyI18n's
      * textContent assignment can't wipe its <a> tag). The i18n
@@ -926,7 +1072,7 @@ const STRINGS = {
      * the project name. */
     "about.intro":             "- network print server for the Brother QL-700, running on an ESP32-S3 with a self-hosted web UI.",
     "about.firmware":          "Firmware",
-    "about.licenses":          "Third-party components bundled with this firmware:",
+    "about.licenses":          "Third-party components used by this firmware:",
     "about.icon.tooltip":      "LabelSis -- open the project page on GitHub",
     "panel.wifi":              "Wi-Fi networks",
     "panel.wifi.help":         "LabelSis tries each saved network in order on boot, last-used first. AP-mode onboarding only kicks in when every entry fails. Add the networks for each place this device travels to (home, office, workshop) and the device picks the first that's reachable.",
@@ -3407,6 +3553,7 @@ function refreshUndoButtons() {
  * list is rerendered when the error state flips so the .err class
  * tracks reality without thrashing the DOM on every redraw. */
 let printingInProgress = false;
+let shippingPdfExportInProgress = false;
 let _lastPrintErr      = null;
 function refreshPrintButtons() {
   const err = elements.some(e => e._barcodeError || e._qrError);
@@ -3425,6 +3572,26 @@ function refreshPrintButtons() {
   const qlMediaTip = "QL-700 printing requires a ready 62 mm continuous DK-22205 roll";
   print.title = badQlMedia ? qlMediaTip : tip;
   all.title = badQlMedia ? qlMediaTip : tip;
+  const shipping = document.getElementById("shipping-print");
+  const hasShippingCrop = typeof shippingCropSelection !== "undefined" &&
+    !!shippingCropSelection && !!shippingCropSelection.split &&
+    shippingCropSelection.page === shippingPdfPageNumber &&
+    shippingCropSelection.width > 0 && shippingCropSelection.height > 0;
+  const shippingExport = document.getElementById("shipping-export-pdf");
+  if (shippingExport) {
+    /* PDF export is intentionally independent of printer connectivity. */
+    shippingExport.disabled = !hasShippingCrop || printingInProgress || shippingPdfExportInProgress;
+  }
+  if (shipping) {
+    shipping.disabled = !hasShippingCrop || noPrint || badQlMedia || printingInProgress || shippingPdfExportInProgress;
+    shipping.title = noPrint || badQlMedia ? qlMediaTip :
+      (!hasShippingCrop ? "Select a shipping-label area first" : "Print both shipping-label halves");
+    const shippingStatus = document.getElementById("shipping-print-status");
+    if (shippingStatus && !printingInProgress) {
+      shippingStatus.textContent = noPrint || badQlMedia ? t("shipping.print.offline") :
+        (hasShippingCrop ? t("shipping.print.ready") : t("shipping.print.select"));
+    }
+  }
   if (_lastPrintErr !== null && _lastPrintErr !== err) renderLayerList();
   _lastPrintErr = err;
 }
@@ -3731,6 +3898,915 @@ document.getElementById("lib-file").addEventListener("change", async e => {
   }
   const err = applyDesignDoc(doc, f.name);
   if (err) log(`could not import ${f.name}: ${err}`, false);
+});
+
+/* Shipping-label import and crop selection.
+ * PDF.js is loaded lazily so normal label editing does not pay its
+ * download/parse cost. The version is pinned for reproducible behavior.
+ * The library and its worker are currently fetched from jsDelivr; they
+ * are not yet embedded in the ESP32 firmware bundle. */
+const SHIPPING_PDFJS_VERSION = "6.5.438";
+const SHIPPING_PRINT_WIDTH_MM = QL700_TAPE.print * 25.4 / currentDpi(); /* 696 printable dots */
+const SHIPPING_PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${SHIPPING_PDFJS_VERSION}/`;
+let shippingPdfJsPromise = null;
+let pendingShippingLabelPdf = null;
+let shippingPdfDocument = null;
+let shippingPdfLoadingTask = null;
+let shippingPdfRenderTask = null;
+let shippingPdfPageNumber = 1;
+let shippingPdfViewport = null;
+let shippingPdfPageSize = null;
+let shippingCropSelection = null;
+let shippingCropDrag = null;
+let shippingLoadSequence = 0;
+let shippingRenderSequence = 0;
+
+const shippingLabelInput = document.getElementById("shipping-label-file");
+const shippingLabelStatus = document.getElementById("shipping-label-import-status");
+const shippingPdfControls = document.getElementById("shipping-pdf-controls");
+const shippingPdfPreview = document.getElementById("shipping-pdf-preview");
+const shippingPdfStage = document.getElementById("shipping-pdf-stage");
+const shippingPdfCanvas = document.getElementById("shipping-pdf-canvas");
+const shippingPdfSelect = document.getElementById("shipping-pdf-select");
+const shippingPdfCropRect = document.getElementById("shipping-pdf-crop-rect");
+const shippingPdfSplitBand = document.getElementById("shipping-pdf-split-band");
+const shippingSplitTools = document.getElementById("shipping-split-tools");
+const shippingSplitOverlapInput = document.getElementById("shipping-split-overlap");
+const shippingSplitTopCanvas = document.getElementById("shipping-split-top");
+const shippingSplitBottomCanvas = document.getElementById("shipping-split-bottom");
+const shippingSplitTopSize = document.getElementById("shipping-split-top-size");
+const shippingSplitBottomSize = document.getElementById("shipping-split-bottom-size");
+const shippingOutputResolution = document.getElementById("shipping-output-resolution");
+const shippingPrintButton = document.getElementById("shipping-print");
+const shippingPrintStatus = document.getElementById("shipping-print-status");
+const shippingPdfExportButton = document.getElementById("shipping-export-pdf");
+const shippingPdfExportStatus = document.getElementById("shipping-export-pdf-status");
+const shippingPageInfo = document.getElementById("shipping-page-info");
+const shippingPagePrev = document.getElementById("shipping-page-prev");
+const shippingPageNext = document.getElementById("shipping-page-next");
+const shippingCropReset = document.getElementById("shipping-crop-reset");
+const shippingCropHelp = document.getElementById("shipping-crop-help");
+const shippingCropSize = document.getElementById("shipping-crop-size");
+
+async function getShippingPdfJs() {
+  if (!shippingPdfJsPromise) {
+    shippingPdfJsPromise = import(`${SHIPPING_PDFJS_BASE}build/pdf.mjs`).then(pdfjs => {
+      pdfjs.GlobalWorkerOptions.workerSrc = `${SHIPPING_PDFJS_BASE}build/pdf.worker.mjs`;
+      return pdfjs;
+    }).catch(err => {
+      shippingPdfJsPromise = null;
+      throw new Error(`Could not load the PDF renderer: ${err.message}`);
+    });
+  }
+  return shippingPdfJsPromise;
+}
+
+function resetShippingCrop() {
+  shippingCropDrag = null;
+  shippingCropSelection = null;
+  shippingPdfCropRect.style.display = "none";
+  shippingPdfSplitBand.style.height = "0";
+  shippingCropReset.hidden = true;
+  shippingCropSize.hidden = true;
+  shippingCropSize.textContent = "";
+  shippingSplitTools.hidden = true;
+  shippingSplitTopCanvas.width = 0;
+  shippingSplitTopCanvas.height = 0;
+  shippingSplitBottomCanvas.width = 0;
+  shippingSplitBottomCanvas.height = 0;
+  shippingSplitTopSize.textContent = "";
+  shippingSplitBottomSize.textContent = "";
+  refreshPrintButtons();
+}
+
+function updateShippingCropVisual() {
+  if (!shippingCropSelection || !shippingPdfViewport) {
+    shippingPdfCropRect.style.display = "none";
+    return;
+  }
+  const crop = shippingCropSelection;
+  shippingPdfCropRect.style.display = "block";
+  shippingPdfCropRect.style.left = `${crop.x * shippingPdfViewport.width}px`;
+  shippingPdfCropRect.style.top = `${crop.y * shippingPdfViewport.height}px`;
+  shippingPdfCropRect.style.width = `${crop.width * shippingPdfViewport.width}px`;
+  shippingPdfCropRect.style.height = `${crop.height * shippingPdfViewport.height}px`;
+  updateShippingSplitGuide();
+}
+
+function updateShippingSplitGuide() {
+  if (!shippingCropSelection || !shippingPdfViewport || !shippingPdfPageSize) {
+    shippingPdfSplitBand.style.height = "0";
+    return;
+  }
+  const crop = shippingCropSelection;
+  const cropHeightMm = crop.height * shippingPdfPageSize.height * 25.4 / 72;
+  const cropWidthMm = crop.width * shippingPdfPageSize.width * 25.4 / 72;
+  if (!(cropHeightMm > 0) || !(cropWidthMm > 0)) {
+    shippingPdfSplitBand.style.height = "0";
+    return;
+  }
+  const tapeScale = Math.min(1, SHIPPING_PRINT_WIDTH_MM / cropWidthMm);
+  const requestedOverlapMm = shippingClamp(Number(shippingSplitOverlapInput.value) || 0, 0, 20);
+  const outputOverlapMm = Math.min(requestedOverlapMm, Math.max(0, cropHeightMm * tapeScale * 0.8));
+  const sourceOverlapMm = tapeScale > 0 ? outputOverlapMm / tapeScale : 0;
+  const overlapFraction = shippingClamp(sourceOverlapMm / cropHeightMm, 0, 0.8);
+  shippingPdfSplitBand.style.height = `${overlapFraction * 100}%`;
+}
+
+function updateShippingPageControls() {
+  const hasDoc = !!shippingPdfDocument;
+  shippingPdfControls.hidden = !hasDoc;
+  shippingPdfPreview.hidden = !hasDoc;
+  shippingCropHelp.hidden = !hasDoc;
+  shippingPagePrev.disabled = !hasDoc || shippingPdfPageNumber <= 1;
+  shippingPageNext.disabled = !hasDoc || shippingPdfPageNumber >= shippingPdfDocument.numPages;
+  if (hasDoc) {
+    shippingPageInfo.textContent = `${t("shipping.page")} ${shippingPdfPageNumber} / ${shippingPdfDocument.numPages}`;
+  } else {
+    shippingPageInfo.textContent = "";
+  }
+}
+
+function shippingClamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function shippingPdfRectFromViewport(x1, y1, x2, y2) {
+  const p1 = shippingPdfViewport.convertToPdfPoint(x1, y1);
+  const p2 = shippingPdfViewport.convertToPdfPoint(x2, y2);
+  return [Math.min(p1[0], p2[0]), Math.min(p1[1], p2[1]),
+          Math.max(p1[0], p2[0]), Math.max(p1[1], p2[1])];
+}
+
+function getShippingSplitGeometry() {
+  const crop = shippingCropSelection;
+  if (!crop || crop.page !== shippingPdfPageNumber || !shippingPdfViewport || !shippingPdfPageSize ||
+      !(crop.width > 0) || !(crop.height > 0)) return null;
+
+  const widthMm = crop.width * shippingPdfPageSize.width * 25.4 / 72;
+  const heightMm = crop.height * shippingPdfPageSize.height * 25.4 / 72;
+  if (!(widthMm > 0) || !(heightMm > 0)) return null;
+
+  /* Fit the selected crop to the 696-dot printable band of the DK-22205
+   * 62 mm roll (58.9 mm at 300 dpi). The overlap control is therefore
+   * expressed in finished print millimetres, not source-PDF millimetres. */
+  const tapeScale = Math.min(1, SHIPPING_PRINT_WIDTH_MM / widthMm);
+  const maxOverlapMm = Math.max(0, heightMm * tapeScale * 0.8);
+  const requestedOverlapMm = Number(shippingSplitOverlapInput.value);
+  const overlapMm = shippingClamp(Number.isFinite(requestedOverlapMm) ? requestedOverlapMm : 3,
+                                  0, Math.min(20, maxOverlapMm));
+  const sourceOverlapMm = tapeScale > 0 ? overlapMm / tapeScale : 0;
+  const overlapFraction = shippingClamp(sourceOverlapMm / heightMm, 0, 0.8);
+
+  const x1 = crop.x * shippingPdfViewport.width;
+  const x2 = (crop.x + crop.width) * shippingPdfViewport.width;
+  const y1 = crop.y * shippingPdfViewport.height;
+  const y2 = (crop.y + crop.height) * shippingPdfViewport.height;
+  const middleY = (y1 + y2) / 2;
+  const overlapCssPx = (y2 - y1) * overlapFraction;
+  const topEndY = middleY + overlapCssPx / 2;
+  const bottomStartY = middleY - overlapCssPx / 2;
+
+  return {
+    sourceX: crop.x * shippingPdfCanvas.width,
+    sourceY: crop.y * shippingPdfCanvas.height,
+    sourceWidth: crop.width * shippingPdfCanvas.width,
+    sourceHeight: crop.height * shippingPdfCanvas.height,
+    topSourceHeight: crop.height * shippingPdfCanvas.height * (0.5 + overlapFraction / 2),
+    bottomSourceY: (crop.y + crop.height * (0.5 - overlapFraction / 2)) * shippingPdfCanvas.height,
+    bottomSourceHeight: crop.height * shippingPdfCanvas.height * (0.5 + overlapFraction / 2),
+    outputWidthMm: widthMm * tapeScale,
+    outputOverlapMm: overlapMm,
+    overlapFraction,
+    topHeightMm: (heightMm * (0.5 + overlapFraction / 2)) * tapeScale,
+    bottomHeightMm: (heightMm * (0.5 + overlapFraction / 2)) * tapeScale,
+    topPdfRect: shippingPdfRectFromViewport(x1, y1, x2, topEndY),
+    bottomPdfRect: shippingPdfRectFromViewport(x1, bottomStartY, x2, y2)
+  };
+}
+
+function createShippingCropCanvas() {
+  const crop = shippingCropSelection;
+  if (!crop || !shippingPdfCanvas.width || !shippingPdfCanvas.height) return null;
+  const left = crop.x * shippingPdfCanvas.width;
+  const top = crop.y * shippingPdfCanvas.height;
+  const right = (crop.x + crop.width) * shippingPdfCanvas.width;
+  const bottom = (crop.y + crop.height) * shippingPdfCanvas.height;
+  const width = Math.max(1, Math.ceil(right - left));
+  const height = Math.max(1, Math.ceil(bottom - top));
+  if (width * height > 24000000)
+    throw new Error("The selected area is too large to render. Reduce the crop size.");
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { alpha: false });
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, width, height);
+
+  /* Intersect the crop with the rendered PDF page. Everything outside
+   * that intersection remains white, so extending the crop handles
+   * beyond the PDF page adds printable whitespace rather than clipping. */
+  const sx = Math.max(0, left);
+  const sy = Math.max(0, top);
+  const sr = Math.min(shippingPdfCanvas.width, right);
+  const sb = Math.min(shippingPdfCanvas.height, bottom);
+  if (!(sr > sx && sb > sy))
+    throw new Error(t("shipping.crop.outside"));
+  context.drawImage(shippingPdfCanvas, sx, sy, sr - sx, sb - sy,
+                    sx - left, sy - top, sr - sx, sb - sy);
+  return canvas;
+}
+
+function drawShippingSplitCanvas(canvas, sourceCanvas, sourceX, sourceY, sourceWidth, sourceHeight) {
+  const maxPreviewWidth = 1000;
+  const previewScale = Math.min(1, maxPreviewWidth / sourceWidth);
+  const targetWidth = Math.max(1, Math.round(sourceWidth * previewScale));
+  const targetHeight = Math.max(1, Math.round(sourceHeight * previewScale));
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const context = canvas.getContext("2d", { alpha: false });
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, targetWidth, targetHeight);
+  context.drawImage(sourceCanvas, sourceX, sourceY, sourceWidth, sourceHeight,
+                    0, 0, targetWidth, targetHeight);
+}
+
+function updateShippingSplitPreview() {
+  const geometry = getShippingSplitGeometry();
+  const hasSelection = !!geometry;
+  shippingSplitTools.hidden = !hasSelection;
+  shippingOutputResolution.hidden = !hasSelection;
+  updateShippingSplitGuide();
+  if (!geometry) {
+    shippingOutputResolution.textContent = "";
+    return;
+  }
+
+  const outputDpi = currentDpi();
+  const outputWidthPx = Math.max(1, Math.min(QL700_TAPE.print,
+    Math.round(geometry.outputWidthMm * outputDpi / 25.4)));
+  const outputHeightPx = Math.max(1, Math.round(geometry.topHeightMm * outputDpi / 25.4));
+  shippingOutputResolution.textContent = t("shipping.output.resolution", {
+    width: outputWidthPx, height: outputHeightPx, dpi: outputDpi
+  });
+
+  try {
+    const cropCanvas = createShippingCropCanvas();
+    if (!cropCanvas) return;
+    drawShippingSplitCanvas(shippingSplitTopCanvas, cropCanvas, 0, 0,
+                            cropCanvas.width, cropCanvas.height * (0.5 + geometry.overlapFraction / 2));
+    drawShippingSplitCanvas(shippingSplitBottomCanvas, cropCanvas, 0,
+                            cropCanvas.height * (0.5 - geometry.overlapFraction / 2),
+                            cropCanvas.width, cropCanvas.height * (0.5 + geometry.overlapFraction / 2));
+  } catch (err) {
+    log(err.message, false);
+    shippingCropSelection.split = null;
+    shippingSplitTools.hidden = true;
+    refreshPrintButtons();
+    return;
+  }
+  shippingSplitTopSize.textContent = `${geometry.outputWidthMm.toFixed(1)} × ${geometry.topHeightMm.toFixed(1)} mm`;
+  shippingSplitBottomSize.textContent = `${geometry.outputWidthMm.toFixed(1)} × ${geometry.bottomHeightMm.toFixed(1)} mm`;
+  /* Keep the source-PDF rectangles with the crop for the print stage. */
+  shippingCropSelection.split = {
+    overlapMm: geometry.outputOverlapMm,
+    topPdfRect: geometry.topPdfRect,
+    bottomPdfRect: geometry.bottomPdfRect
+  };
+  refreshPrintButtons();
+}
+
+/* Render the selected crop again from the original PDF at print resolution.
+ * The interactive preview is deliberately small, so it must never be used as
+ * the source for final print/export images. Coordinates are normalized to the
+ * page viewport and therefore remain valid at this independent render scale.
+ * Any crop area outside the page stays white. */
+async function createShippingCropCanvasAtPrintDpi(crop, pdfDocument, dpi) {
+  if (!crop || !pdfDocument || !(dpi > 0))
+    throw new Error(t("shipping.crop.none"));
+
+  const page = await pdfDocument.getPage(crop.page);
+  try {
+    const viewport = page.getViewport({ scale: dpi / 72 });
+    const left = crop.x * viewport.width;
+    const top = crop.y * viewport.height;
+    const right = (crop.x + crop.width) * viewport.width;
+    const bottom = (crop.y + crop.height) * viewport.height;
+    const width = Math.max(1, Math.ceil(right - left));
+    const height = Math.max(1, Math.ceil(bottom - top));
+    const maxPixels = 24000000;
+    const maxDimension = 16000;
+
+    if (width > maxDimension || height > maxDimension || width * height > maxPixels) {
+      throw new Error(t("shipping.output.tooLarge", {
+        width, height, maxPixels: (maxPixels / 1000000).toFixed(0)
+      }));
+    }
+    if (!(right > 0 && bottom > 0 && left < viewport.width && top < viewport.height))
+      throw new Error(t("shipping.crop.outside"));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { alpha: false });
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, width, height);
+
+    const task = page.render({
+      canvasContext: context,
+      viewport,
+      transform: [1, 0, 0, 1, -left, -top],
+      background: "rgb(255,255,255)"
+    });
+    try {
+      await task.promise;
+    } catch (err) {
+      if (err && err.name === "RenderingCancelledException")
+        throw new Error(t("shipping.output.renderCancelled"));
+      throw err;
+    }
+    return canvas;
+  } finally {
+    if (typeof page.cleanup === "function") page.cleanup();
+  }
+}
+
+/* Create the two final, physical-size images from one full-resolution crop.
+ * Both QL-700 printing and PDF export consume these same canvases. */
+async function createShippingSplitOutputCanvases(crop, geometry, pdfDocument) {
+  const dpi = currentDpi();
+  const cropCanvas = await createShippingCropCanvasAtPrintDpi(crop, pdfDocument, dpi);
+  try {
+    const splitFraction = geometry.overlapFraction;
+    const halfSourceHeight = cropCanvas.height * (0.5 + splitFraction / 2);
+    const bottomSourceY = cropCanvas.height * (0.5 - splitFraction / 2);
+    const topCanvas = makeShippingPdfPageCanvas(cropCanvas, 0, halfSourceHeight,
+                                                 geometry.outputWidthMm, geometry.topHeightMm);
+    const bottomCanvas = makeShippingPdfPageCanvas(cropCanvas, bottomSourceY, halfSourceHeight,
+                                                    geometry.outputWidthMm, geometry.bottomHeightMm);
+    return { dpi, topCanvas, bottomCanvas };
+  } finally {
+    /* The two final print-size canvases are now independent of this larger
+     * intermediate render. Release its backing store before encoding/printing. */
+    cropCanvas.width = 0;
+    cropCanvas.height = 0;
+  }
+}
+
+function makeShippingPrintRasterFromPageCanvas(pageCanvas) {
+  const rows = pageCanvas.height;
+  const widthDots = pageCanvas.width;
+  const canvas = document.createElement("canvas");
+  canvas.width = rows;
+  canvas.height = QL700_TAPE.dots;
+  const context = canvas.getContext("2d", { alpha: false });
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  const topMargin = QL700_TAPE.margin + Math.floor((QL700_TAPE.print - widthDots) / 2);
+  /* Rotate the natural label image into the QL-700's length x head-dot
+   * raster layout without resampling, preserving the exact PDF-export pixels. */
+  context.setTransform(0, 1, 1, 0, 0, topMargin);
+  context.drawImage(pageCanvas, 0, 0);
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  return canvas;
+}
+
+/* Build a page image in the same pixel dimensions used by QL-700
+ * printing, but keep it in natural (label width x feed length)
+ * orientation for an ordinary PDF viewer / Windows printer driver. */
+function makeShippingPdfPageCanvas(sourceCanvas, sourceY, sourceHeight, widthMm, lengthMm) {
+  const dpi = currentDpi();
+  const widthDots = Math.max(1, Math.min(QL700_TAPE.print, Math.round(widthMm * dpi / 25.4)));
+  const rows = Math.round(lengthMm * dpi / 25.4);
+  if (rows < 360) throw new Error(t("shipping.print.tooShort"));
+  if (rows > 1500) throw new Error(t("shipping.print.tooLong"));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = widthDots;
+  canvas.height = rows;
+  const context = canvas.getContext("2d", { alpha: false });
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, widthDots, rows);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(sourceCanvas, 0, sourceY, sourceCanvas.width, sourceHeight,
+                    0, 0, widthDots, rows);
+  return canvas;
+}
+
+function shippingPdfAscii(text) {
+  return new TextEncoder().encode(text);
+}
+
+function shippingPdfConcat(parts) {
+  const size = parts.reduce((total, part) => total + part.length, 0);
+  const result = new Uint8Array(size);
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
+}
+
+function shippingCanvasRgb(canvas) {
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const rgba = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const rgb = new Uint8Array(canvas.width * canvas.height * 3);
+  for (let src = 0, dst = 0; src < rgba.length; src += 4) {
+    rgb[dst++] = rgba[src];
+    rgb[dst++] = rgba[src + 1];
+    rgb[dst++] = rgba[src + 2];
+  }
+  return rgb;
+}
+
+async function compressShippingPdfImage(rgb) {
+  /* Deflate keeps the PDF compact. Older browsers can still export a
+   * valid PDF with uncompressed RGB image streams. */
+  if (typeof CompressionStream === "undefined") return { bytes: rgb, filter: "" };
+  try {
+    const compressedStream = new Blob([rgb]).stream().pipeThrough(new CompressionStream("deflate"));
+    const compressed = new Uint8Array(await new Response(compressedStream).arrayBuffer());
+    return { bytes: compressed, filter: " /Filter /FlateDecode" };
+  } catch (_) {
+    return { bytes: rgb, filter: "" };
+  }
+}
+
+function shippingPdfStreamObject(id, dictionary, streamBytes) {
+  return shippingPdfConcat([
+    shippingPdfAscii(`${id} 0 obj\n${dictionary}\nstream\n`),
+    streamBytes,
+    shippingPdfAscii("\nendstream\nendobj\n")
+  ]);
+}
+
+function buildShippingSplitPdf(pageImages, dpi) {
+  const mediaWidthPt = 62 * 72 / 25.4;
+  const objectCount = 2 + pageImages.length * 3;
+  const objects = new Array(objectCount + 1);
+  const pageIds = pageImages.map((_, index) => 3 + index * 3);
+
+  objects[1] = shippingPdfAscii("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+  objects[2] = shippingPdfAscii(`2 0 obj\n<< /Type /Pages /Kids [${pageIds.map(id => `${id} 0 R`).join(" ")}] /Count ${pageImages.length} >>\nendobj\n`);
+
+  pageImages.forEach((item, index) => {
+    const pageId = 3 + index * 3;
+    const contentId = pageId + 1;
+    const imageId = pageId + 2;
+    const pageHeightPt = item.canvas.height * 72 / dpi;
+    const imageWidthPt = item.canvas.width * 72 / dpi;
+    const xOffsetPt = (mediaWidthPt - imageWidthPt) / 2;
+    const content = shippingPdfAscii(
+      `q\n${imageWidthPt.toFixed(4)} 0 0 ${pageHeightPt.toFixed(4)} ${xOffsetPt.toFixed(4)} 0 cm\n/Im0 Do\nQ\n`
+    );
+
+    objects[pageId] = shippingPdfAscii(
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${mediaWidthPt.toFixed(4)} ${pageHeightPt.toFixed(4)}] /Resources << /XObject << /Im0 ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>\nendobj\n`
+    );
+    objects[contentId] = shippingPdfStreamObject(
+      contentId,
+      `<< /Length ${content.length} >>`,
+      content
+    );
+    objects[imageId] = shippingPdfStreamObject(
+      imageId,
+      `<< /Type /XObject /Subtype /Image /Width ${item.canvas.width} /Height ${item.canvas.height} /ColorSpace /DeviceRGB /BitsPerComponent 8${item.filter} /Length ${item.bytes.length} >>`,
+      item.bytes
+    );
+  });
+
+  const chunks = [shippingPdfAscii("%PDF-1.4\n")];
+  const offsets = new Array(objectCount + 1).fill(0);
+  let offset = chunks[0].length;
+  for (let id = 1; id <= objectCount; id++) {
+    offsets[id] = offset;
+    chunks.push(objects[id]);
+    offset += objects[id].length;
+  }
+  const xrefOffset = offset;
+  let xref = `xref\n0 ${objectCount + 1}\n0000000000 65535 f \n`;
+  for (let id = 1; id <= objectCount; id++)
+    xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
+  xref += `trailer\n<< /Size ${objectCount + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  chunks.push(shippingPdfAscii(xref));
+  return shippingPdfConcat(chunks);
+}
+
+async function exportShippingLabelPdf() {
+  const geometry = getShippingSplitGeometry();
+  if (!geometry || !shippingCropSelection || !shippingCropSelection.split || !shippingPdfDocument) {
+    const message = t("shipping.print.select");
+    shippingPdfExportStatus.textContent = message;
+    log(message, false);
+    return;
+  }
+
+  shippingPdfExportInProgress = true;
+  shippingPdfExportStatus.textContent = t("shipping.export.pdf.preparing");
+  refreshPrintButtons();
+  try {
+    const cropSnapshot = { ...shippingCropSelection };
+    const sourceDocument = shippingPdfDocument;
+    const output = await createShippingSplitOutputCanvases(cropSnapshot, geometry, sourceDocument);
+    const pageImages = [];
+    for (const canvas of [output.topCanvas, output.bottomCanvas]) {
+      const rgb = shippingCanvasRgb(canvas);
+      const encoded = await compressShippingPdfImage(rgb);
+      pageImages.push({ canvas, bytes: encoded.bytes, filter: encoded.filter });
+    }
+
+    const pdfBytes = buildShippingSplitPdf(pageImages, output.dpi);
+    const blob = new Blob([pdfBytes], { type: "application/pdf" });
+    const sourceName = pendingShippingLabelPdf?.name || "shipping-label.pdf";
+    const safeBaseName = sourceName.replace(/\.pdf$/i, "")
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").trim() || "shipping-label";
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${safeBaseName}-split-labels.pdf`;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+
+    const message = t("shipping.export.pdf.done");
+    shippingPdfExportStatus.textContent = message;
+    log(`${message} (${(blob.size / 1024).toFixed(0)} KB)`, true);
+  } catch (err) {
+    const message = t("shipping.export.pdf.error", { error: err.message });
+    shippingPdfExportStatus.textContent = message;
+    log(message, false);
+  } finally {
+    shippingPdfExportInProgress = false;
+    refreshPrintButtons();
+  }
+}
+
+async function sendShippingPrintRaster(rasterCanvas) {
+  const body = packRaster(rasterCanvas);
+  const response = await fetch(apiURL("/api/ql700/print"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "X-QL700-Confirm": "print-62mm"
+    },
+    body
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  return result;
+}
+
+async function printShippingLabel() {
+  const geometry = getShippingSplitGeometry();
+  if (!geometry || !shippingCropSelection || !shippingCropSelection.split || !shippingPdfDocument) return;
+  const printerReady = printer && printer.ok && printer.transport === "usb_host" &&
+    printer.printer === "QL-700" && printer.ready && printer.print_supported &&
+    printer.media_width_mm === 62 && printer.media_type === 74 && printer.media_length_mm === 0;
+  if (!printerReady) {
+    const message = t("shipping.print.offline");
+    shippingPrintStatus.textContent = message;
+    log(message, false);
+    refreshPrintButtons();
+    return;
+  }
+  const overlap = geometry.outputOverlapMm.toFixed(1);
+  if (!confirm(t("shipping.print.confirm", { overlap }))) return;
+
+  printingInProgress = true;
+  refreshPrintButtons();
+  let firstSent = false;
+  try {
+    shippingPrintStatus.textContent = t("shipping.output.rendering", { dpi: currentDpi() });
+    const cropSnapshot = { ...shippingCropSelection };
+    const sourceDocument = shippingPdfDocument;
+    const output = await createShippingSplitOutputCanvases(cropSnapshot, geometry, sourceDocument);
+    const topRaster = makeShippingPrintRasterFromPageCanvas(output.topCanvas);
+    const bottomRaster = makeShippingPrintRasterFromPageCanvas(output.bottomCanvas);
+
+    shippingPrintStatus.textContent = t("shipping.print.sending", { half: 1 });
+    log(t("shipping.print.sending", { half: 1 }));
+    const first = await sendShippingPrintRaster(topRaster);
+    firstSent = true;
+    shippingPrintStatus.textContent = t("shipping.print.sending", { half: 2 });
+    log(t("shipping.print.sending", { half: 2 }), true);
+    await sendShippingPrintRaster(bottomRaster);
+    shippingPrintStatus.textContent = t("shipping.print.done");
+    log(t("shipping.print.done"), true);
+    if (first.printer_complete_verified === false)
+      log(`${t("shipping.print.done")} (USB rows sent; physical completion is not verified)`, true);
+  } catch (err) {
+    const message = firstSent
+      ? t("shipping.print.partial", { error: err.message })
+      : t("shipping.print.error", { error: err.message });
+    shippingPrintStatus.textContent = message;
+    log(message, false);
+  } finally {
+    printingInProgress = false;
+    refreshPrintButtons();
+    refreshStatus();
+  }
+}
+
+async function renderShippingPdfPage() {
+  if (!shippingPdfDocument) return;
+  const renderSequence = ++shippingRenderSequence;
+  if (shippingPdfRenderTask) {
+    try { shippingPdfRenderTask.cancel(); } catch (_) {}
+    shippingPdfRenderTask = null;
+  }
+
+  const page = await shippingPdfDocument.getPage(shippingPdfPageNumber);
+  if (renderSequence !== shippingRenderSequence) return;
+  const naturalViewport = page.getViewport({ scale: 1 });
+  const availableWidth = Math.max(220, shippingPdfPreview.clientWidth - 16);
+  const scale = Math.min(availableWidth / naturalViewport.width, 1.6);
+  const viewport = page.getViewport({ scale });
+  const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+
+  shippingPdfViewport = viewport;
+  shippingPdfPageSize = { width: naturalViewport.width, height: naturalViewport.height };
+  shippingPdfStage.style.width = `${viewport.width}px`;
+  shippingPdfStage.style.height = `${viewport.height}px`;
+  shippingPdfCanvas.width = Math.ceil(viewport.width * outputScale);
+  shippingPdfCanvas.height = Math.ceil(viewport.height * outputScale);
+  shippingPdfCanvas.style.width = `${viewport.width}px`;
+  shippingPdfCanvas.style.height = `${viewport.height}px`;
+  shippingPdfSelect.style.width = `${viewport.width}px`;
+  shippingPdfSelect.style.height = `${viewport.height}px`;
+  updateShippingCropVisual();
+
+  const context = shippingPdfCanvas.getContext("2d", { alpha: false });
+  const task = page.render({
+    canvasContext: context,
+    viewport,
+    transform: [outputScale, 0, 0, outputScale, 0, 0],
+    background: "rgb(255,255,255)"
+  });
+  shippingPdfRenderTask = task;
+  try {
+    await task.promise;
+  } catch (err) {
+    if (err && err.name === "RenderingCancelledException") return;
+    throw err;
+  } finally {
+    if (shippingPdfRenderTask === task) shippingPdfRenderTask = null;
+  }
+  if (renderSequence !== shippingRenderSequence) return;
+  updateShippingPageControls();
+  updateShippingCropVisual();
+  updateShippingSplitPreview();
+}
+
+async function openShippingPdf(file, sequence) {
+  let header;
+  try {
+    header = new TextDecoder("ascii").decode(await file.slice(0, 1024).arrayBuffer());
+  } catch (err) {
+    throw new Error(`Could not read ${file.name}: ${err.message}`);
+  }
+  if (!header.includes("%PDF-")) throw new Error(`${file.name} does not appear to be a PDF file`);
+
+  shippingLabelStatus.textContent = t("shipping.loading");
+  const pdfjs = await getShippingPdfJs();
+  if (sequence !== shippingLoadSequence) return;
+
+  const data = new Uint8Array(await file.arrayBuffer());
+  if (sequence !== shippingLoadSequence) return;
+  const task = pdfjs.getDocument({
+    data,
+    useSystemFonts: true,
+    cMapUrl: `${SHIPPING_PDFJS_BASE}cmaps/`,
+    cMapPacked: true,
+    standardFontDataUrl: `${SHIPPING_PDFJS_BASE}standard_fonts/`,
+    wasmUrl: `${SHIPPING_PDFJS_BASE}wasm/`
+  });
+  shippingPdfLoadingTask = task;
+  const doc = await task.promise;
+  if (shippingPdfLoadingTask === task) shippingPdfLoadingTask = null;
+  if (sequence !== shippingLoadSequence) {
+    await doc.destroy();
+    return;
+  }
+
+  if (shippingPdfDocument) {
+    try { await shippingPdfDocument.destroy(); } catch (_) {}
+  }
+  pendingShippingLabelPdf = file;
+  shippingPdfDocument = doc;
+  shippingPdfPageNumber = 1;
+  resetShippingCrop();
+  updateShippingPageControls();
+  await renderShippingPdfPage();
+  if (sequence !== shippingLoadSequence) return;
+
+  const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
+  shippingLabelStatus.textContent = `${file.name} (${sizeMb} MB)`;
+  log(`loaded shipping label PDF: ${file.name} (${doc.numPages} pages)`, true);
+}
+
+document.getElementById("shipping-label-import").addEventListener("click", () => {
+  shippingLabelInput.click();
+});
+shippingLabelInput.addEventListener("change", async e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";           /* allow selecting the same PDF again */
+  if (!file) return;
+
+  const sequence = ++shippingLoadSequence;
+  if (shippingPdfRenderTask) {
+    try { shippingPdfRenderTask.cancel(); } catch (_) {}
+    shippingPdfRenderTask = null;
+  }
+  if (shippingPdfLoadingTask) {
+    try { await shippingPdfLoadingTask.destroy(); } catch (_) {}
+    shippingPdfLoadingTask = null;
+  }
+  if (shippingPdfDocument) {
+    try { await shippingPdfDocument.destroy(); } catch (_) {}
+    shippingPdfDocument = null;
+  }
+  pendingShippingLabelPdf = null;
+  shippingPdfViewport = null;
+  shippingPdfPageSize = null;
+  shippingPdfCanvas.width = 0;
+  shippingPdfCanvas.height = 0;
+  resetShippingCrop();
+  updateShippingPageControls();
+
+  try {
+    await openShippingPdf(file, sequence);
+  } catch (err) {
+    if (sequence !== shippingLoadSequence) return;
+    pendingShippingLabelPdf = null;
+    shippingPdfDocument = null;
+    updateShippingPageControls();
+    shippingLabelStatus.textContent = t("shipping.import.none");
+    log(`could not open ${file.name}: ${err.message}`, false);
+  }
+});
+
+shippingPagePrev.addEventListener("click", async () => {
+  if (!shippingPdfDocument || shippingPdfPageNumber <= 1) return;
+  shippingPdfPageNumber--;
+  resetShippingCrop();
+  updateShippingPageControls();
+  try { await renderShippingPdfPage(); }
+  catch (err) { log(`could not render PDF page: ${err.message}`, false); }
+});
+shippingPageNext.addEventListener("click", async () => {
+  if (!shippingPdfDocument || shippingPdfPageNumber >= shippingPdfDocument.numPages) return;
+  shippingPdfPageNumber++;
+  resetShippingCrop();
+  updateShippingPageControls();
+  try { await renderShippingPdfPage(); }
+  catch (err) { log(`could not render PDF page: ${err.message}`, false); }
+});
+shippingCropReset.addEventListener("click", resetShippingCrop);
+shippingSplitOverlapInput.addEventListener("input", () => {
+  updateShippingSplitGuide();
+  updateShippingSplitPreview();
+});
+
+function shippingPointerPosition(e) {
+  const box = shippingPdfSelect.getBoundingClientRect();
+  return {
+    x: (e.clientX - box.left) * shippingPdfViewport.width / Math.max(1, box.width),
+    y: (e.clientY - box.top) * shippingPdfViewport.height / Math.max(1, box.height)
+  };
+}
+
+function finishShippingCropEdit() {
+  if (!shippingCropSelection || !shippingPdfViewport) return;
+  const crop = shippingCropSelection;
+  if (crop.width * shippingPdfViewport.width < 8 || crop.height * shippingPdfViewport.height < 8) {
+    resetShippingCrop();
+    return;
+  }
+  const x1 = crop.x * shippingPdfViewport.width;
+  const y1 = crop.y * shippingPdfViewport.height;
+  const x2 = (crop.x + crop.width) * shippingPdfViewport.width;
+  const y2 = (crop.y + crop.height) * shippingPdfViewport.height;
+  const p1 = shippingPdfViewport.convertToPdfPoint(x1, y1);
+  const p2 = shippingPdfViewport.convertToPdfPoint(x2, y2);
+  crop.pdfRect = [Math.min(p1[0], p2[0]), Math.min(p1[1], p2[1]),
+                  Math.max(p1[0], p2[0]), Math.max(p1[1], p2[1])];
+  const widthMm = (crop.width * shippingPdfPageSize.width * 25.4 / 72).toFixed(1);
+  const heightMm = (crop.height * shippingPdfPageSize.height * 25.4 / 72).toFixed(1);
+  shippingCropSize.textContent = t("shipping.crop.size", { width: widthMm, height: heightMm });
+  shippingCropSize.hidden = false;
+  shippingCropReset.hidden = false;
+  updateShippingSplitPreview();
+  log(`shipping-label crop updated on page ${shippingPdfPageNumber}: ${widthMm} × ${heightMm} mm`, true);
+}
+
+shippingPdfSelect.addEventListener("pointerdown", e => {
+  if (!shippingPdfViewport || !shippingPdfDocument) return;
+  const point = shippingPointerPosition(e);
+  const handle = e.target.closest ? e.target.closest("[data-shipping-handle]") : null;
+  const inCrop = shippingPdfCropRect.contains(e.target) && shippingCropSelection;
+  let mode = "draw";
+  let handleName = null;
+  if (handle && inCrop) {
+    mode = "resize";
+    handleName = handle.dataset.handle;
+  } else if (inCrop) {
+    mode = "move";
+  }
+
+  const initial = shippingCropSelection ? { ...shippingCropSelection } : null;
+  if (mode === "draw") {
+    shippingCropSelection = { page: shippingPdfPageNumber,
+      x: point.x / shippingPdfViewport.width, y: point.y / shippingPdfViewport.height,
+      width: 0, height: 0 };
+  }
+  const initialPx = initial ? {
+    left: initial.x * shippingPdfViewport.width,
+    top: initial.y * shippingPdfViewport.height,
+    right: (initial.x + initial.width) * shippingPdfViewport.width,
+    bottom: (initial.y + initial.height) * shippingPdfViewport.height
+  } : null;
+  shippingCropDrag = { mode, handle: handleName, startX: point.x, startY: point.y,
+    pointerId: e.pointerId, initial, initialPx };
+  if (shippingCropSelection) shippingCropSelection.split = null;
+  shippingPdfSelect.setPointerCapture(e.pointerId);
+  shippingCropReset.hidden = false;
+  shippingCropSize.hidden = true;
+  refreshPrintButtons();
+  updateShippingCropVisual();
+  e.preventDefault();
+});
+
+shippingPdfSelect.addEventListener("pointermove", e => {
+  const drag = shippingCropDrag;
+  if (!drag || e.pointerId !== drag.pointerId || !shippingPdfViewport) return;
+  const point = shippingPointerPosition(e);
+  const pageW = shippingPdfViewport.width;
+  const pageH = shippingPdfViewport.height;
+  const minSize = 8;
+  let left, top, right, bottom;
+
+  if (drag.mode === "draw") {
+    left = Math.min(drag.startX, point.x);
+    top = Math.min(drag.startY, point.y);
+    right = Math.max(drag.startX, point.x);
+    bottom = Math.max(drag.startY, point.y);
+  } else if (drag.mode === "move" && drag.initialPx) {
+    const dx = point.x - drag.startX;
+    const dy = point.y - drag.startY;
+    left = drag.initialPx.left + dx;
+    right = drag.initialPx.right + dx;
+    top = drag.initialPx.top + dy;
+    bottom = drag.initialPx.bottom + dy;
+  } else if (drag.mode === "resize" && drag.initialPx) {
+    ({ left, top, right, bottom } = drag.initialPx);
+    const h = drag.handle;
+    if (h.includes("w")) left = Math.min(point.x, right - minSize);
+    if (h.includes("e")) right = Math.max(point.x, left + minSize);
+    if (h.includes("n")) top = Math.min(point.y, bottom - minSize);
+    if (h.includes("s")) bottom = Math.max(point.y, top + minSize);
+  }
+  if (![left, top, right, bottom].every(Number.isFinite)) return;
+  shippingCropSelection = { page: shippingPdfPageNumber,
+    x: left / pageW, y: top / pageH,
+    width: Math.max(minSize, right - left) / pageW,
+    height: Math.max(minSize, bottom - top) / pageH };
+  updateShippingCropVisual();
+});
+
+shippingPdfSelect.addEventListener("pointerup", e => {
+  if (!shippingCropDrag || e.pointerId !== shippingCropDrag.pointerId || !shippingPdfViewport) return;
+  shippingCropDrag = null;
+  finishShippingCropEdit();
+});
+shippingPdfSelect.addEventListener("pointercancel", () => {
+  const drag = shippingCropDrag;
+  shippingCropDrag = null;
+  if (!drag) return;
+  if (drag.mode === "draw") {
+    resetShippingCrop();
+  } else if (drag.initial) {
+    shippingCropSelection = drag.initial;
+    finishShippingCropEdit();
+  }
+});
+shippingPrintButton.addEventListener("click", printShippingLabel);
+shippingPdfExportButton.addEventListener("click", exportShippingLabelPdf);
+
+let shippingPdfResizeTimer = null;
+window.addEventListener("resize", () => {
+  if (!shippingPdfDocument) return;
+  clearTimeout(shippingPdfResizeTimer);
+  shippingPdfResizeTimer = setTimeout(() => {
+    if (shippingPdfDocument) renderShippingPdfPage().catch(err =>
+      log(`could not resize PDF preview: ${err.message}`, false));
+  }, 180);
 });
 
 /* duplicate selected */
