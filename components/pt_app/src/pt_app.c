@@ -798,7 +798,7 @@ static uint8_t *ql700_alloc_bitmap(size_t bytes)
 }
 
 /* QL-700 bitmap endpoint for DK-22205 62 mm continuous stock.
- * Body: 360..2952 rows (up to approximately 250 mm), each 90 bytes,
+ * Body: 150..2952 rows (12.7..250 mm), each 90 bytes,
  * MSB-first head dots. The full body is received before the printer is
  * touched, so a client disconnect cannot leave a partial job in the printer.
  */

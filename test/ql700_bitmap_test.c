@@ -25,6 +25,7 @@ static bool fail_write(void *unused, const uint8_t *data, size_t len)
 }
 int main(void)
 {
+    assert(QL700_BITMAP_MIN_ROWS == 150u); /* 12.7 mm at 300 DPI */
     const unsigned n = QL700_BITMAP_MIN_ROWS;
     const unsigned max_n = QL700_BITMAP_MAX_ROWS;
     const size_t body_size = (size_t)max_n * QL700_ROW_BYTES;

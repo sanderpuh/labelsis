@@ -29,7 +29,7 @@ typedef bool (*ql700_write_fn)(void *ctx, const uint8_t *data, size_t size);
  */
 bool ql700_send_test_page_62mm(ql700_write_fn write, void *ctx);
 
-#define QL700_BITMAP_MIN_ROWS     360u /* approximately 30.5mm long */
+#define QL700_BITMAP_MIN_ROWS     150u /* QL-700 continuous media minimum: 12.7 mm */
 #define QL700_BITMAP_MAX_ROWS    2952u /* approximately 250mm at 300 dpi */
 
 /* Input is row-major 90 bytes per raster line, exactly 720 MSB-first pins.

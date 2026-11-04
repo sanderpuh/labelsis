@@ -512,7 +512,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <option value="auto"  data-i18n="field.length.auto">auto</option>
           <option value="fixed" data-i18n="field.length.fixed">fixed</option>
         </select>
-        <input id="opt-len-mm" type="number" min="5" max="500" step="1" value="30" style="max-width:80px; min-width:60px;"
+        <input id="opt-len-mm" type="number" min="12.7" max="500" step="0.1" value="30" style="max-width:80px; min-width:60px;"
                data-i18n-attr="title:field.length.mm.help"
                title="Label length in millimetres (only used when length = fixed).">
         <span class="muted" style="font-size:.85rem;">mm</span>
@@ -1055,10 +1055,11 @@ const STRINGS = {
     "shipping.print.offline":  "Connect a ready QL-700 with DK-22205 62 mm continuous tape.",
     "shipping.print.confirm":  "Print both shipping-label halves? Label 1 prints first, then label 2. They will overlap by {overlap} mm when joined.",
     "shipping.print.sending":  "Printing shipping-label half {half} of 2...",
+    "shipping.print.waiting":  "Waiting for the QL-700 to finish label {half} before sending the next one...",
     "shipping.print.done":     "Both shipping-label halves were sent to the printer.",
     "shipping.print.partial":  "Label 1 was sent, but label 2 failed: {error}. Check the printer before retrying.",
     "shipping.print.error":    "Could not print shipping label: {error}",
-    "shipping.print.tooShort": "Shipping-label half is too short for the QL-700 raster endpoint (minimum 30.5 mm).",
+    "shipping.print.tooShort": "Shipping-label half is too short for the QL-700 raster endpoint (minimum 12.7 mm).",
     "shipping.print.tooLong":  "Shipping-label half is too long for the QL-700 raster endpoint (maximum 250 mm).",
     "shipping.export.pdf.button": "Export split labels to PDF",
     "shipping.export.pdf.ready":  "Creates a two-page PDF for DK-22205 62 mm continuous media. In Windows, print at Actual size (100%), not Fit to page.",
@@ -1329,6 +1330,19 @@ function apiURL(path) { return apiHost + path; }
 
 // Fixed geometry for the supported DK-22205 62 mm continuous roll.
 const QL700_TAPE = { print: 696, margin: 12, dots: 720 };
+const QL700_CONTINUOUS_MEDIA_TYPE = 0x0a; /* Brother status code for continuous tape */
+/* Brother QL-700 continuous-media limits used by the browser print path.
+ * Minimum is 150 raster rows (12.7 mm at 300 DPI); firmware and UI use the
+ * same row count. The firmware bitmap endpoint and shipping-label flow cap
+ * jobs at 250 mm. */
+const QL700_MIN_FEED_ROWS = 150;
+const QL700_MIN_FEED_MM = QL700_MIN_FEED_ROWS * 25.4 / 300;
+const QL700_MAX_FEED_ROWS = 2952;
+function clampLabelLengthMm(value) {
+  const mm = Number(value);
+  return Math.max(QL700_MIN_FEED_MM, Math.min(500,
+    Number.isFinite(mm) ? mm : 30));
+}
 
 let printer = null;  // last /api/status response
 let deviceInfo = null;  // last /api/info  response (cached, refreshed on demand)
@@ -1528,7 +1542,7 @@ const PRINT_W_MAX = 2500;
 const CANVAS_OPTS_KEY = "labelsis:canvasOpts";
 const CANVAS_OPTS_DEFAULT = {
   labelWidthMode: "auto",   /* "auto" | "fixed"                    */
-  labelWidthMm:   30,       /* used when fixed                     */
+  labelWidthMm:   30,       /* used when fixed; minimum 12.7 mm     */
   showRulers:     true,
   showGrid:       false,
   showCenter:     false,
@@ -1540,6 +1554,9 @@ let canvasOpts = (() => {
     return Object.assign({}, CANVAS_OPTS_DEFAULT, raw ? JSON.parse(raw) : {});
   } catch { return Object.assign({}, CANVAS_OPTS_DEFAULT); }
 })();
+/* Migrate older saved designs/settings that allowed values below the
+ * continuous-roll minimum so the editor, preview and print raster agree. */
+canvasOpts.labelWidthMm = clampLabelLengthMm(canvasOpts.labelWidthMm);
 function saveCanvasOpts() {
   try { localStorage.setItem(CANVAS_OPTS_KEY, JSON.stringify(canvasOpts)); }
   catch {}
@@ -2575,7 +2592,7 @@ function redraw(forPrint = false) {
 
   {
     if (printW > 1500) overflow = true;
-    printW = Math.max(360, Math.min(1500, printW));
+    printW = Math.max(QL700_MIN_FEED_ROWS, Math.min(1500, printW));
   }
   if (forPrint) {
     /* Tight canvas, no padding -- packRaster reads this directly so
@@ -3560,7 +3577,7 @@ function refreshPrintButtons() {
   const noPrint = !printer || !printer.ok || printer.transport !== "usb_host" || printer.printer !== "QL-700";
   const badQlMedia = printer?.printer === "QL-700" &&
     !(printer.ready && printer.print_supported && printer.media_width_mm === 62 &&
-      printer.media_type === 10 && printer.media_length_mm === 0);
+      printer.media_type === QL700_CONTINUOUS_MEDIA_TYPE && printer.media_length_mm === 0);
   const print = document.getElementById("print");
   const all = document.getElementById("print-all");
   if (!print || !all) return;
@@ -3862,7 +3879,7 @@ function applyDesignDoc(doc, filename) {
     if (canvas.labelWidthMode === "auto" || canvas.labelWidthMode === "fixed")
       canvasOpts.labelWidthMode = canvas.labelWidthMode;
     if (isFinite(canvas.labelWidthMm))
-      canvasOpts.labelWidthMm = canvas.labelWidthMm;
+      canvasOpts.labelWidthMm = clampLabelLengthMm(canvas.labelWidthMm);
     saveCanvasOpts();
     const $mode = document.getElementById("opt-len-mode");
     const $mm   = document.getElementById("opt-len-mm");
@@ -3907,7 +3924,7 @@ document.getElementById("lib-file").addEventListener("change", async e => {
  * are not yet embedded in the ESP32 firmware bundle. */
 const SHIPPING_PDFJS_VERSION = "6.5.438";
 const SHIPPING_PRINT_WIDTH_MM = QL700_TAPE.print * 25.4 / currentDpi(); /* 696 printable dots */
-const SHIPPING_MAX_FEED_ROWS = 2952; /* approximately 250 mm at 300 DPI */
+const SHIPPING_MAX_FEED_ROWS = QL700_MAX_FEED_ROWS; /* approximately 250 mm at 300 DPI */
 const SHIPPING_PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${SHIPPING_PDFJS_VERSION}/`;
 let shippingPdfJsPromise = null;
 let pendingShippingLabelPdf = null;
@@ -4108,6 +4125,10 @@ function getShippingSplitGeometry() {
     topSourceHeight: crop.height * shippingPdfCanvas.height * (0.5 + overlapFraction / 2),
     bottomSourceY: (crop.y + crop.height * (0.5 - overlapFraction / 2)) * shippingPdfCanvas.height,
     bottomSourceHeight: crop.height * shippingPdfCanvas.height * (0.5 + overlapFraction / 2),
+    /* Keep the scale in the geometry passed to the print/export renderer.
+     * It uses this to render the source PDF at sufficient DPI before
+     * producing the final physical-size raster. */
+    tapeScale,
     outputWidthMm: widthMm * tapeScale,
     outputOverlapMm: overlapMm,
     overlapFraction,
@@ -4304,8 +4325,11 @@ async function createShippingSplitOutputCanvases(crop, geometry, pdfDocument) {
 }
 
 function makeShippingPrintRasterFromPageCanvas(pageCanvas) {
-  /* The page canvas is already rotated to feed-length x tape-width. Place it
-   * into the full 720-dot printhead raster, retaining the QL-700 side margins. */
+  /* The shared page canvas reverses the cross-tape axis so its transposed PDF
+   * export has the intended reading direction. The raw QL-700 raster needs
+   * the opposite head-axis order: undo that reversal here, only for printing.
+   * Keep the PDF/export canvas untouched so its already-correct orientation
+   * remains unchanged. */
   const rows = pageCanvas.width;
   const widthDots = pageCanvas.height;
   const canvas = document.createElement("canvas");
@@ -4315,7 +4339,11 @@ function makeShippingPrintRasterFromPageCanvas(pageCanvas) {
   context.fillStyle = "#fff";
   context.fillRect(0, 0, canvas.width, canvas.height);
   const topMargin = QL700_TAPE.margin + Math.floor((QL700_TAPE.print - widthDots) / 2);
-  context.drawImage(pageCanvas, 0, topMargin);
+  context.save();
+  context.translate(0, topMargin + widthDots);
+  context.scale(1, -1);
+  context.drawImage(pageCanvas, 0, 0);
+  context.restore();
   return canvas;
 }
 
@@ -4329,7 +4357,7 @@ function makeShippingPdfPageCanvas(sourceCanvas, sourceY, sourceHeight, tapeWidt
   const dpi = currentDpi();
   const widthDots = Math.max(1, Math.min(QL700_TAPE.print, Math.round(tapeWidthMm * dpi / 25.4)));
   const rows = Math.round(feedLengthMm * dpi / 25.4);
-  if (rows < 360) throw new Error(t("shipping.print.tooShort"));
+  if (rows < QL700_MIN_FEED_ROWS) throw new Error(t("shipping.print.tooShort"));
   if (rows > SHIPPING_MAX_FEED_ROWS) throw new Error(t("shipping.print.tooLong"));
 
   const canvas = document.createElement("canvas");
@@ -4553,12 +4581,75 @@ async function sendShippingPrintRaster(rasterCanvas) {
   return result;
 }
 
+function shippingPrintDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/* The firmware acknowledges a successful USB transfer before the QL-700 has
+ * necessarily finished feeding and cutting the label. The next bitmap request
+ * is accepted only while the printer reports its idle/editing phase, so wait
+ * for that transition before submitting the second half. A conservative
+ * length-based floor handles very short jobs whose printing phase can be
+ * missed between status polls; two consecutive idle reads avoid reacting to
+ * a single transient status packet. */
+async function waitForShippingPrinterReady(feedRows, half) {
+  const startedAt = Date.now();
+  const feedLengthMm = feedRows * 25.4 / currentDpi();
+  const minimumSettleMs = Math.max(1800, Math.ceil(feedLengthMm / 60 * 1000) + 1200);
+  const timeoutMs = Math.max(30000, minimumSettleMs + 15000);
+  let readySamples = 0;
+  let lastPhase = "unknown";
+
+  while (Date.now() - startedAt < timeoutMs) {
+    await shippingPrintDelay(500);
+    const response = await fetch(apiURL("/api/status"), { cache: "no-store" });
+    const status = await response.json().catch(() => null);
+
+    /* The regular UI status poll can briefly own the printer lock. A 503
+     * busy/timeout response is transient here; retry rather than aborting. */
+    if (response.status === 503 &&
+        (status?.error === "busy" || status?.error === "ql700_status_timeout_or_invalid")) {
+      readySamples = 0;
+      continue;
+    }
+    if (!response.ok || !status?.ok) {
+      throw new Error(status?.error || `Printer status check failed (HTTP ${response.status})`);
+    }
+
+    if (status.media_type !== QL700_CONTINUOUS_MEDIA_TYPE ||
+        status.media_width_mm !== 62 || status.media_length_mm !== 0) {
+      throw new Error("The QL-700 no longer reports DK-22205 62 mm continuous media.");
+    }
+
+    lastPhase = PHASE_TYPES[status.phase_type] || `phase ${status.phase_type}`;
+    const idle = status.ready && status.phase_type === 0 &&
+      status.error1 === 0 && status.error2 === 0;
+    if (!idle) {
+      readySamples = 0;
+      shippingPrintStatus.textContent = t("shipping.print.waiting", { half });
+      continue;
+    }
+
+    if (Date.now() - startedAt >= minimumSettleMs) {
+      readySamples++;
+      if (readySamples >= 2) {
+        printer = status;
+        renderStatus(status);
+        return status;
+      }
+    }
+  }
+
+  throw new Error(`The QL-700 did not return to idle after label ${half} (last phase: ${lastPhase}).`);
+}
+
 async function printShippingLabel() {
   const geometry = getShippingSplitGeometry();
   if (!geometry || !shippingCropSelection || !shippingCropSelection.split || !shippingPdfDocument) return;
   const printerReady = printer && printer.ok && printer.transport === "usb_host" &&
     printer.printer === "QL-700" && printer.ready && printer.print_supported &&
-    printer.media_width_mm === 62 && printer.media_type === 74 && printer.media_length_mm === 0;
+    printer.media_width_mm === 62 &&
+    printer.media_type === QL700_CONTINUOUS_MEDIA_TYPE && printer.media_length_mm === 0;
   if (!printerReady) {
     const message = t("shipping.print.offline");
     shippingPrintStatus.textContent = message;
@@ -4584,6 +4675,10 @@ async function printShippingLabel() {
     log(t("shipping.print.sending", { half: 1 }));
     const first = await sendShippingPrintRaster(topRaster);
     firstSent = true;
+    shippingPrintStatus.textContent = t("shipping.print.waiting", { half: 1 });
+    log(t("shipping.print.waiting", { half: 1 }));
+    await waitForShippingPrinterReady(topRaster.width, 1);
+
     shippingPrintStatus.textContent = t("shipping.print.sending", { half: 2 });
     log(t("shipping.print.sending", { half: 2 }), true);
     await sendShippingPrintRaster(bottomRaster);
@@ -5825,6 +5920,11 @@ function evtToCanvas(ev) {
  * timer is cancelled. Right-click opens the same menu directly. */
 let longPressTimer = null;
 let longPressStart = null;
+/* A one-finger touch that starts on blank canvas space is reserved for
+ * page scrolling. A tap still deselects on pointerup; a swipe preserves
+ * the selection and scrolls the page explicitly because the canvas uses
+ * touch-action:none for element dragging and two-finger pinch zoom. */
+let blankTouchScroll = null;
 
 canvas.addEventListener("pointerdown", ev => {
   hideContextMenu();
@@ -5834,6 +5934,7 @@ canvas.addEventListener("pointerdown", ev => {
    * and snapshot the gesture's reference distance + midpoint +
    * current zoom/pan. */
   if (activePointers.size >= 2) {
+    blankTouchScroll = null;
     drag = null;
     clearTimeout(longPressTimer); longPressTimer = null;
     const pts = Array.from(activePointers.values());
@@ -5897,6 +5998,17 @@ canvas.addEventListener("pointerdown", ev => {
   }
 
   const hit = hitTest(p.x, p.y);
+  if (!hit && ev.pointerType === "touch") {
+    blankTouchScroll = {
+      pointerId: ev.pointerId,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      lastY: ev.clientY,
+      moved: false
+    };
+    canvas.setPointerCapture(ev.pointerId);
+    return;
+  }
   selectElement(hit ? hit.id : null);
   if (hit) {
     pushUndo();
@@ -5931,6 +6043,24 @@ canvas.addEventListener("pointermove", ev => {
     panX = pinchInitial.panX + (mx - pinchInitial.mx);
     panY = pinchInitial.panY + (my - pinchInitial.my);
     applyTransform();
+    return;
+  }
+
+  /* Blank-area touch swipe: translate finger movement into document
+   * scrolling without changing the active element. The first few pixels
+   * distinguish a tap (deselect on release) from an intentional swipe. */
+  if (blankTouchScroll && blankTouchScroll.pointerId === ev.pointerId) {
+    const dx = ev.clientX - blankTouchScroll.startX;
+    const dy = ev.clientY - blankTouchScroll.startY;
+    if (!blankTouchScroll.moved && dx * dx + dy * dy > 36)
+      blankTouchScroll.moved = true;
+    if (blankTouchScroll.moved) {
+      if (Math.abs(dy) >= Math.abs(dx)) {
+        const scrollDelta = blankTouchScroll.lastY - ev.clientY;
+        if (scrollDelta) window.scrollBy(0, scrollDelta);
+      }
+      blankTouchScroll.lastY = ev.clientY;
+    }
     return;
   }
 
@@ -6040,6 +6170,11 @@ function clampElementPos(el) {
   el.y = Math.max(-h + MIN_VISIBLE, Math.min(HEAD_PX - MIN_VISIBLE, el.y));
 }
 function endPointer(ev) {
+  if (ev && blankTouchScroll && blankTouchScroll.pointerId === ev.pointerId) {
+    const gesture = blankTouchScroll;
+    blankTouchScroll = null;
+    if (!gesture.moved && ev.type === "pointerup") selectElement(null);
+  }
   if (ev) activePointers.delete(ev.pointerId);
   if (activePointers.size < 2) pinchInitial = null;
   clearTimeout(longPressTimer); longPressTimer = null; longPressStart = null;
@@ -6319,6 +6454,7 @@ document.getElementById("csv-clear").addEventListener("click", () => {
   const $origin = document.getElementById("opt-origin");
 
   function syncToUI() {
+    canvasOpts.labelWidthMm = clampLabelLengthMm(canvasOpts.labelWidthMm);
     $mode.value     = canvasOpts.labelWidthMode;
     $mm.value       = canvasOpts.labelWidthMm;
     $mm.disabled    = canvasOpts.labelWidthMode !== "fixed";
@@ -6335,15 +6471,20 @@ document.getElementById("csv-clear").addEventListener("click", () => {
     if ($mode.value === "fixed" && canvasOpts.labelWidthMode === "auto") {
       const c = document.getElementById("preview");
       const currentPx = c.width - 2 * PAD;
-      canvasOpts.labelWidthMm = Math.max(5, Math.min(500, Math.round(currentPx / PX_PER_MM)));
+      canvasOpts.labelWidthMm = clampLabelLengthMm(Math.round((currentPx / PX_PER_MM) * 10) / 10);
     }
     canvasOpts.labelWidthMode = $mode.value;
     saveCanvasOpts(); syncToUI(); redraw();
   });
   $mm.addEventListener("input", () => {
-    const v = parseInt($mm.value, 10);
+    const v = parseFloat($mm.value);
     if (!Number.isFinite(v)) return;
-    canvasOpts.labelWidthMm = Math.max(5, Math.min(500, v));
+    canvasOpts.labelWidthMm = clampLabelLengthMm(v);
+    saveCanvasOpts(); redraw();
+  });
+  $mm.addEventListener("change", () => {
+    canvasOpts.labelWidthMm = clampLabelLengthMm($mm.value);
+    $mm.value = canvasOpts.labelWidthMm;
     saveCanvasOpts(); redraw();
   });
   for (const [el, key] of [[$rulers, "showRulers"], [$grid, "showGrid"], [$center, "showCenter"]]) {
