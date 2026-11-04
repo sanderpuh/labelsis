@@ -16,7 +16,7 @@ typedef struct {
     uint8_t error1;
     uint8_t error2;
     uint8_t media_width_mm;
-    uint8_t media_type;       /* 0x4a continuous; 0x4b die-cut; 0 no media */
+    uint8_t media_type;       /* QL-700: 0x0a continuous; 0x0b die-cut; 0 no media */
     uint8_t media_length_mm;  /* 0 for continuous */
     uint8_t status_type;
     uint8_t phase_type;

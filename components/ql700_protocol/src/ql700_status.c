@@ -30,8 +30,8 @@ const char *ql700_media_kind(uint8_t type)
 {
     switch (type) {
     case 0x00: return "none";
-    case 0x4a: return "continuous";
-    case 0x4b: return "die_cut";
+    case 0x0a: return "continuous";
+    case 0x0b: return "die_cut";
     default:   return "unknown";
     }
 }

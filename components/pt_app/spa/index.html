@@ -861,7 +861,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
             <input id="shipping-split-overlap" type="number" min="0" max="20" step="0.5" value="3" inputmode="decimal" style="width:5.25rem;">
             <span class="muted" data-i18n="shipping.split.unit">mm</span>
           </div>
-          <p class="shipping-split-help" data-i18n="shipping.split.help">The selected area is split horizontally at its midpoint. Both halves are fitted to the 58.9 mm printable width of the DK-22205 62 mm roll; overlap is measured on the finished print.</p>
+          <p class="shipping-split-help" data-i18n="shipping.split.help">The selected area is split horizontally at its midpoint. Both halves are rotated 90° clockwise. Artwork is limited to the QL-700's 58.9 mm printable band (696 dots), not the full 62 mm roll width. Overlap is measured on the finished print.</p>
           <div class="shipping-split-previews">
             <div class="shipping-split-card">
               <div class="shipping-split-card-header">
@@ -1042,10 +1042,10 @@ const STRINGS = {
     "shipping.crop.size":      "Selected area: {width} × {height} mm",
     "shipping.split.overlap":  "Overlap on print",
     "shipping.split.unit":     "mm",
-    "shipping.split.help":     "The selected area is split horizontally at its midpoint. Both halves are fitted to the 58.9 mm printable width of the DK-22205 62 mm roll; overlap is measured on the finished print.",
+    "shipping.split.help":     "The selected area is split horizontally at its midpoint. Both halves are rotated 90° clockwise. Artwork is limited to the QL-700's 58.9 mm printable band (696 dots), not the full 62 mm roll width. Overlap is measured on the finished print.",
     "shipping.split.top":      "Label 1 — top half",
     "shipping.split.bottom":   "Label 2 — bottom half",
-    "shipping.output.resolution": "Final output: {width} × {height} px per half at {dpi} DPI. Rendered from the original PDF; the on-screen preview is scaled.",
+    "shipping.output.resolution": "Final output: {width} × {height} px per half at {dpi} DPI (feed length × printable tape width). Each half is enlarged or reduced proportionally to use as much of the 58.9 mm printable tape width as possible. Rendered from the original PDF at the required source resolution; the on-screen preview is scaled.",
     "shipping.output.tooLarge": "The selected area is too large for high-resolution output ({width} × {height} pixels). Reduce the crop size and try again.",
     "shipping.output.renderCancelled": "High-resolution rendering was cancelled. Please try again.",
     "shipping.output.rendering": "Rendering both halves from the original PDF at {dpi} DPI...",
@@ -1059,7 +1059,7 @@ const STRINGS = {
     "shipping.print.partial":  "Label 1 was sent, but label 2 failed: {error}. Check the printer before retrying.",
     "shipping.print.error":    "Could not print shipping label: {error}",
     "shipping.print.tooShort": "Shipping-label half is too short for the QL-700 raster endpoint (minimum 30.5 mm).",
-    "shipping.print.tooLong":  "Shipping-label half is too long for the QL-700 raster endpoint (maximum 127 mm).",
+    "shipping.print.tooLong":  "Shipping-label half is too long for the QL-700 raster endpoint (maximum 250 mm).",
     "shipping.export.pdf.button": "Export split labels to PDF",
     "shipping.export.pdf.ready":  "Creates a two-page PDF for DK-22205 62 mm continuous media. In Windows, print at Actual size (100%), not Fit to page.",
     "shipping.export.pdf.preparing": "Rendering the selected area from the original PDF at print resolution and preparing the two-page PDF...",
@@ -3560,7 +3560,7 @@ function refreshPrintButtons() {
   const noPrint = !printer || !printer.ok || printer.transport !== "usb_host" || printer.printer !== "QL-700";
   const badQlMedia = printer?.printer === "QL-700" &&
     !(printer.ready && printer.print_supported && printer.media_width_mm === 62 &&
-      printer.media_type === 74 && printer.media_length_mm === 0);
+      printer.media_type === 10 && printer.media_length_mm === 0);
   const print = document.getElementById("print");
   const all = document.getElementById("print-all");
   if (!print || !all) return;
@@ -3907,6 +3907,7 @@ document.getElementById("lib-file").addEventListener("change", async e => {
  * are not yet embedded in the ESP32 firmware bundle. */
 const SHIPPING_PDFJS_VERSION = "6.5.438";
 const SHIPPING_PRINT_WIDTH_MM = QL700_TAPE.print * 25.4 / currentDpi(); /* 696 printable dots */
+const SHIPPING_MAX_FEED_ROWS = 2952; /* approximately 250 mm at 300 DPI */
 const SHIPPING_PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${SHIPPING_PDFJS_VERSION}/`;
 let shippingPdfJsPromise = null;
 let pendingShippingLabelPdf = null;
@@ -3999,18 +4000,16 @@ function updateShippingSplitGuide() {
     return;
   }
   const crop = shippingCropSelection;
-  const cropHeightMm = crop.height * shippingPdfPageSize.height * 25.4 / 72;
   const cropWidthMm = crop.width * shippingPdfPageSize.width * 25.4 / 72;
-  if (!(cropHeightMm > 0) || !(cropWidthMm > 0)) {
+  const cropHeightMm = crop.height * shippingPdfPageSize.height * 25.4 / 72;
+  if (!(cropWidthMm > 0) || !(cropHeightMm > 0)) {
     shippingPdfSplitBand.style.height = "0";
     return;
   }
-  const tapeScale = Math.min(1, SHIPPING_PRINT_WIDTH_MM / cropWidthMm);
-  const requestedOverlapMm = shippingClamp(Number(shippingSplitOverlapInput.value) || 0, 0, 20);
-  const outputOverlapMm = Math.min(requestedOverlapMm, Math.max(0, cropHeightMm * tapeScale * 0.8));
-  const sourceOverlapMm = tapeScale > 0 ? outputOverlapMm / tapeScale : 0;
-  const overlapFraction = shippingClamp(sourceOverlapMm / cropHeightMm, 0, 0.8);
-  shippingPdfSplitBand.style.height = `${overlapFraction * 100}%`;
+  const requestedOverlapValue = Number(shippingSplitOverlapInput.value);
+  const requestedOverlapMm = Number.isFinite(requestedOverlapValue) ? requestedOverlapValue : 3;
+  const splitSizing = getShippingSplitSizing(cropHeightMm, requestedOverlapMm, cropWidthMm);
+  shippingPdfSplitBand.style.height = `${splitSizing.overlapFraction * 100}%`;
 }
 
 function updateShippingPageControls() {
@@ -4038,6 +4037,41 @@ function shippingPdfRectFromViewport(x1, y1, x2, y2) {
           Math.max(p1[0], p2[0]), Math.max(p1[1], p2[1])];
 }
 
+/* Scale the two horizontal halves to use as much of the printable tape
+ * width as possible, both up and down. Each half's finished cross-tape
+ * dimension is (cropHeight * scale + overlap) / 2. Keep the resulting feed
+ * length within the QL-700's 250 mm (2952-row) raster limit as well. */
+function getShippingSplitSizing(cropHeightMm, requestedOverlapMm, cropWidthMm = 0) {
+  const requested = shippingClamp(Number.isFinite(requestedOverlapMm) ? requestedOverlapMm : 3, 0, 20);
+  const maxFeedLengthMm = SHIPPING_MAX_FEED_ROWS * 25.4 / currentDpi();
+  const maxScaleByFeed = cropWidthMm > 0 ? maxFeedLengthMm / cropWidthMm : Infinity;
+
+  /* Do not cap this at 1: small selections must be enlarged to fill the
+   * printable band. Vector PDF content is rendered later at dpi * tapeScale,
+   * so the enlargement does not come from the small on-screen preview. */
+  let tapeScale = Math.min(
+    Math.max(0, (2 * SHIPPING_PRINT_WIDTH_MM - requested) / cropHeightMm),
+    maxScaleByFeed
+  );
+  let maxOverlapMm = Math.max(0, cropHeightMm * tapeScale * 0.8);
+  let overlapMm = Math.min(requested, maxOverlapMm);
+
+  /* If the 80% overlap guard reduced the requested overlap, recalculate the
+   * maximum fit scale using the overlap that will actually be printed. */
+  if (overlapMm + 1e-6 < requested) {
+    tapeScale = Math.min(
+      Math.max(0, (2 * SHIPPING_PRINT_WIDTH_MM - overlapMm) / cropHeightMm),
+      maxScaleByFeed
+    );
+    maxOverlapMm = Math.max(0, cropHeightMm * tapeScale * 0.8);
+    overlapMm = Math.min(overlapMm, maxOverlapMm);
+  }
+
+  const sourceOverlapMm = tapeScale > 0 ? overlapMm / tapeScale : 0;
+  const overlapFraction = shippingClamp(sourceOverlapMm / cropHeightMm, 0, 0.8);
+  return { tapeScale, overlapMm, overlapFraction };
+}
+
 function getShippingSplitGeometry() {
   const crop = shippingCropSelection;
   if (!crop || crop.page !== shippingPdfPageNumber || !shippingPdfViewport || !shippingPdfPageSize ||
@@ -4047,16 +4081,15 @@ function getShippingSplitGeometry() {
   const heightMm = crop.height * shippingPdfPageSize.height * 25.4 / 72;
   if (!(widthMm > 0) || !(heightMm > 0)) return null;
 
-  /* Fit the selected crop to the 696-dot printable band of the DK-22205
-   * 62 mm roll (58.9 mm at 300 dpi). The overlap control is therefore
-   * expressed in finished print millimetres, not source-PDF millimetres. */
-  const tapeScale = Math.min(1, SHIPPING_PRINT_WIDTH_MM / widthMm);
-  const maxOverlapMm = Math.max(0, heightMm * tapeScale * 0.8);
+  /* The selection is split horizontally. After the 90-degree output
+   * rotation, each half's source-PDF height becomes the tape's cross-width;
+   * the source-PDF width becomes the variable feed length. Fit the half-height
+   * (including half of the overlap) to the 696-dot printable band, not the
+   * source-PDF width. */
   const requestedOverlapMm = Number(shippingSplitOverlapInput.value);
-  const overlapMm = shippingClamp(Number.isFinite(requestedOverlapMm) ? requestedOverlapMm : 3,
-                                  0, Math.min(20, maxOverlapMm));
-  const sourceOverlapMm = tapeScale > 0 ? overlapMm / tapeScale : 0;
-  const overlapFraction = shippingClamp(sourceOverlapMm / heightMm, 0, 0.8);
+  const splitSizing = getShippingSplitSizing(heightMm,
+    Number.isFinite(requestedOverlapMm) ? requestedOverlapMm : 3, widthMm);
+  const { tapeScale, overlapMm, overlapFraction } = splitSizing;
 
   const x1 = crop.x * shippingPdfViewport.width;
   const x2 = (crop.x + crop.width) * shippingPdfViewport.width;
@@ -4119,19 +4152,26 @@ function createShippingCropCanvas() {
 }
 
 function drawShippingSplitCanvas(canvas, sourceCanvas, sourceX, sourceY, sourceWidth, sourceHeight) {
-  const maxPreviewWidth = 1000;
-  const previewScale = Math.min(1, maxPreviewWidth / sourceWidth);
+  /* Show the split strip in print orientation: the 58.9 mm printable band
+   * is vertical, while feed length is horizontal. */
+  const maxPreviewSide = 1000;
+  const previewScale = Math.min(1, maxPreviewSide / Math.max(sourceWidth, sourceHeight));
   const targetWidth = Math.max(1, Math.round(sourceWidth * previewScale));
   const targetHeight = Math.max(1, Math.round(sourceHeight * previewScale));
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
+  canvas.width = targetHeight;
+  canvas.height = targetWidth;
   const context = canvas.getContext("2d", { alpha: false });
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
   context.fillStyle = "#fff";
-  context.fillRect(0, 0, targetWidth, targetHeight);
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  /* Rotate the source 90 degrees clockwise into feed-length x tape-width
+   * coordinates. A true rotation preserves reading direction; transposing
+   * the axes here would mirror the artwork. */
+  context.setTransform(0, 1, -1, 0, targetHeight, 0);
   context.drawImage(sourceCanvas, sourceX, sourceY, sourceWidth, sourceHeight,
                     0, 0, targetWidth, targetHeight);
+  context.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 function updateShippingSplitPreview() {
@@ -4146,9 +4186,11 @@ function updateShippingSplitPreview() {
   }
 
   const outputDpi = currentDpi();
-  const outputWidthPx = Math.max(1, Math.min(QL700_TAPE.print,
-    Math.round(geometry.outputWidthMm * outputDpi / 25.4)));
-  const outputHeightPx = Math.max(1, Math.round(geometry.topHeightMm * outputDpi / 25.4));
+  /* Printer raster order: width is the variable feed length; height is
+   * the fixed cross-tape dimension (at most 696 printable dots). */
+  const outputWidthPx = Math.max(1, Math.round(geometry.outputWidthMm * outputDpi / 25.4));
+  const outputHeightPx = Math.max(1, Math.min(QL700_TAPE.print,
+    Math.round(geometry.topHeightMm * outputDpi / 25.4)));
   shippingOutputResolution.textContent = t("shipping.output.resolution", {
     width: outputWidthPx, height: outputHeightPx, dpi: outputDpi
   });
@@ -4238,15 +4280,20 @@ async function createShippingCropCanvasAtPrintDpi(crop, pdfDocument, dpi) {
  * Both QL-700 printing and PDF export consume these same canvases. */
 async function createShippingSplitOutputCanvases(crop, geometry, pdfDocument) {
   const dpi = currentDpi();
-  const cropCanvas = await createShippingCropCanvasAtPrintDpi(crop, pdfDocument, dpi);
+  /* Render the source PDF at the effective source resolution required by the
+   * physical enlargement. The final printer/PDF canvases remain at `dpi`,
+   * but vector content is rasterized directly at dpi * tapeScale rather than
+   * enlarging a 300-DPI crop or the much smaller interactive preview. */
+  const sourceRenderDpi = dpi * Math.max(1, geometry.tapeScale);
+  const cropCanvas = await createShippingCropCanvasAtPrintDpi(crop, pdfDocument, sourceRenderDpi);
   try {
     const splitFraction = geometry.overlapFraction;
     const halfSourceHeight = cropCanvas.height * (0.5 + splitFraction / 2);
     const bottomSourceY = cropCanvas.height * (0.5 - splitFraction / 2);
     const topCanvas = makeShippingPdfPageCanvas(cropCanvas, 0, halfSourceHeight,
-                                                 geometry.outputWidthMm, geometry.topHeightMm);
+                                                 geometry.topHeightMm, geometry.outputWidthMm);
     const bottomCanvas = makeShippingPdfPageCanvas(cropCanvas, bottomSourceY, halfSourceHeight,
-                                                    geometry.outputWidthMm, geometry.bottomHeightMm);
+                                                    geometry.bottomHeightMm, geometry.outputWidthMm);
     return { dpi, topCanvas, bottomCanvas };
   } finally {
     /* The two final print-size canvases are now independent of this larger
@@ -4257,8 +4304,10 @@ async function createShippingSplitOutputCanvases(crop, geometry, pdfDocument) {
 }
 
 function makeShippingPrintRasterFromPageCanvas(pageCanvas) {
-  const rows = pageCanvas.height;
-  const widthDots = pageCanvas.width;
+  /* The page canvas is already rotated to feed-length x tape-width. Place it
+   * into the full 720-dot printhead raster, retaining the QL-700 side margins. */
+  const rows = pageCanvas.width;
+  const widthDots = pageCanvas.height;
   const canvas = document.createElement("canvas");
   canvas.width = rows;
   canvas.height = QL700_TAPE.dots;
@@ -4266,37 +4315,40 @@ function makeShippingPrintRasterFromPageCanvas(pageCanvas) {
   context.fillStyle = "#fff";
   context.fillRect(0, 0, canvas.width, canvas.height);
   const topMargin = QL700_TAPE.margin + Math.floor((QL700_TAPE.print - widthDots) / 2);
-  /* Rotate the natural label image into the QL-700's length x head-dot
-   * raster layout without resampling, preserving the exact PDF-export pixels. */
-  context.setTransform(0, 1, 1, 0, 0, topMargin);
-  context.drawImage(pageCanvas, 0, 0);
+  context.drawImage(pageCanvas, 0, topMargin);
+  return canvas;
+}
+
+/* Build the QL-700 raster in printer order: canvas.width is the dynamic
+ * feed length and canvas.height is the cross-tape width (at most 696 dots).
+ * Source X maps to feed rows and source Y maps across the print head. Flip
+ * only the cross-tape axis to match the print-head dot order. Do not rotate
+ * or swap axes in this raster: that distorts the aspect ratio and makes the
+ * content upside down when it is later converted to the visual PDF page. */
+function makeShippingPdfPageCanvas(sourceCanvas, sourceY, sourceHeight, tapeWidthMm, feedLengthMm) {
+  const dpi = currentDpi();
+  const widthDots = Math.max(1, Math.min(QL700_TAPE.print, Math.round(tapeWidthMm * dpi / 25.4)));
+  const rows = Math.round(feedLengthMm * dpi / 25.4);
+  if (rows < 360) throw new Error(t("shipping.print.tooShort"));
+  if (rows > SHIPPING_MAX_FEED_ROWS) throw new Error(t("shipping.print.tooLong"));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = rows;
+  canvas.height = widthDots;
+  const context = canvas.getContext("2d", { alpha: false });
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, rows, widthDots);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  /* Keep one uniform scale factor: source width -> feed rows and source
+   * split-height -> print-head dots. Only reverse the head-dot axis. */
+  context.translate(0, widthDots);
+  context.scale(1, -1);
+  context.drawImage(sourceCanvas, 0, sourceY, sourceCanvas.width, sourceHeight,
+                    0, 0, rows, widthDots);
   context.setTransform(1, 0, 0, 1, 0, 0);
   return canvas;
 }
-
-/* Build a page image in the same pixel dimensions used by QL-700
- * printing, but keep it in natural (label width x feed length)
- * orientation for an ordinary PDF viewer / Windows printer driver. */
-function makeShippingPdfPageCanvas(sourceCanvas, sourceY, sourceHeight, widthMm, lengthMm) {
-  const dpi = currentDpi();
-  const widthDots = Math.max(1, Math.min(QL700_TAPE.print, Math.round(widthMm * dpi / 25.4)));
-  const rows = Math.round(lengthMm * dpi / 25.4);
-  if (rows < 360) throw new Error(t("shipping.print.tooShort"));
-  if (rows > 1500) throw new Error(t("shipping.print.tooLong"));
-
-  const canvas = document.createElement("canvas");
-  canvas.width = widthDots;
-  canvas.height = rows;
-  const context = canvas.getContext("2d", { alpha: false });
-  context.fillStyle = "#fff";
-  context.fillRect(0, 0, widthDots, rows);
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
-  context.drawImage(sourceCanvas, 0, sourceY, sourceCanvas.width, sourceHeight,
-                    0, 0, widthDots, rows);
-  return canvas;
-}
-
 function shippingPdfAscii(text) {
   return new TextEncoder().encode(text);
 }
@@ -4345,8 +4397,38 @@ function shippingPdfStreamObject(id, dictionary, streamBytes) {
   ]);
 }
 
+/* Convert the printer raster (feed rows x print-head dots) to the visual
+ * PDF orientation (printable tape width x dynamic feed length). The raster's
+ * cross-tape axis is reversed for the print head; transposing it produces
+ * the same 90-degree clockwise artwork shown in the split preview. */
+function makeShippingPdfExportCanvas(printerCanvas) {
+  const feedRows = printerCanvas.width;
+  const artworkWidthDots = printerCanvas.height;
+  const pageWidthDots = QL700_TAPE.print;
+  if (artworkWidthDots > pageWidthDots)
+    throw new Error("Shipping-label artwork exceeds the QL-700 printable width.");
+
+  const canvas = document.createElement("canvas");
+  canvas.width = pageWidthDots;
+  canvas.height = feedRows;
+  const context = canvas.getContext("2d", { alpha: false });
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, pageWidthDots, feedRows);
+  context.imageSmoothingEnabled = false;
+  const xOffset = Math.floor((pageWidthDots - artworkWidthDots) / 2);
+  /* Transpose printer coordinates into page coordinates. Since the raster
+   * was flipped once on its print-head axis, this yields one readable
+   * clockwise rotation relative to the original PDF selection. */
+  context.setTransform(0, 1, 1, 0, xOffset, 0);
+  context.drawImage(printerCanvas, 0, 0);
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  return canvas;
+}
+
 function buildShippingSplitPdf(pageImages, dpi) {
-  const mediaWidthPt = 62 * 72 / 25.4;
+  /* The PDF images are already in their final physical orientation: fixed
+   * 696-dot width (58.93 mm at 300 DPI) and dynamic feed-length height. Embed
+   * each bitmap 1:1. No PDF /Rotate flag or further image transform is used. */
   const objectCount = 2 + pageImages.length * 3;
   const objects = new Array(objectCount + 1);
   const pageIds = pageImages.map((_, index) => 3 + index * 3);
@@ -4358,15 +4440,14 @@ function buildShippingSplitPdf(pageImages, dpi) {
     const pageId = 3 + index * 3;
     const contentId = pageId + 1;
     const imageId = pageId + 2;
-    const pageHeightPt = item.canvas.height * 72 / dpi;
-    const imageWidthPt = item.canvas.width * 72 / dpi;
-    const xOffsetPt = (mediaWidthPt - imageWidthPt) / 2;
+    const pageWidthPt = item.width * 72 / dpi;
+    const pageHeightPt = item.height * 72 / dpi;
     const content = shippingPdfAscii(
-      `q\n${imageWidthPt.toFixed(4)} 0 0 ${pageHeightPt.toFixed(4)} ${xOffsetPt.toFixed(4)} 0 cm\n/Im0 Do\nQ\n`
+      `q\n${pageWidthPt.toFixed(4)} 0 0 ${pageHeightPt.toFixed(4)} 0 0 cm\n/Im0 Do\nQ\n`
     );
 
     objects[pageId] = shippingPdfAscii(
-      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${mediaWidthPt.toFixed(4)} ${pageHeightPt.toFixed(4)}] /Resources << /XObject << /Im0 ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>\nendobj\n`
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidthPt.toFixed(4)} ${pageHeightPt.toFixed(4)}] /Resources << /XObject << /Im0 ${imageId} 0 R >> >> /Contents ${contentId} 0 R >>\nendobj\n`
     );
     objects[contentId] = shippingPdfStreamObject(
       contentId,
@@ -4375,7 +4456,7 @@ function buildShippingSplitPdf(pageImages, dpi) {
     );
     objects[imageId] = shippingPdfStreamObject(
       imageId,
-      `<< /Type /XObject /Subtype /Image /Width ${item.canvas.width} /Height ${item.canvas.height} /ColorSpace /DeviceRGB /BitsPerComponent 8${item.filter} /Length ${item.bytes.length} >>`,
+      `<< /Type /XObject /Subtype /Image /Width ${item.width} /Height ${item.height} /ColorSpace /DeviceRGB /BitsPerComponent 8${item.filter} /Length ${item.bytes.length} >>`,
       item.bytes
     );
   });
@@ -4396,7 +4477,6 @@ function buildShippingSplitPdf(pageImages, dpi) {
   chunks.push(shippingPdfAscii(xref));
   return shippingPdfConcat(chunks);
 }
-
 async function exportShippingLabelPdf() {
   const geometry = getShippingSplitGeometry();
   if (!geometry || !shippingCropSelection || !shippingCropSelection.split || !shippingPdfDocument) {
@@ -4414,10 +4494,20 @@ async function exportShippingLabelPdf() {
     const sourceDocument = shippingPdfDocument;
     const output = await createShippingSplitOutputCanvases(cropSnapshot, geometry, sourceDocument);
     const pageImages = [];
-    for (const canvas of [output.topCanvas, output.bottomCanvas]) {
-      const rgb = shippingCanvasRgb(canvas);
-      const encoded = await compressShippingPdfImage(rgb);
-      pageImages.push({ canvas, bytes: encoded.bytes, filter: encoded.filter });
+    for (const printerCanvas of [output.topCanvas, output.bottomCanvas]) {
+      /* Keep the printer raster in its native feed-row/head-dot layout. For
+       * PDF export, convert it to a separate 696-dot-wide portrait canvas so
+       * the artwork matches the split preview without vertical stretching. */
+      const pdfCanvas = makeShippingPdfExportCanvas(printerCanvas);
+      try {
+        const rgb = shippingCanvasRgb(pdfCanvas);
+        const encoded = await compressShippingPdfImage(rgb);
+        pageImages.push({ width: pdfCanvas.width, height: pdfCanvas.height,
+                          bytes: encoded.bytes, filter: encoded.filter });
+      } finally {
+        pdfCanvas.width = 0;
+        pdfCanvas.height = 0;
+      }
     }
 
     const pdfBytes = buildShippingSplitPdf(pageImages, output.dpi);

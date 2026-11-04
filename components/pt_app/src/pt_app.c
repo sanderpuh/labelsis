@@ -17,6 +17,7 @@
 #include "esp_crc.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_system.h"
@@ -739,7 +740,7 @@ static esp_err_t ql700_api_status(httpd_req_t *req, const char *ota_av)
         return httpd_resp_send(req, body, length);
     }
     const char *primary_error = ql700_primary_error(&st);
-    const bool supported_media = st.media_type == 0x4a && st.media_width_mm == 62 && st.media_length_mm == 0;
+    const bool supported_media = st.media_type == 0x0a && st.media_width_mm == 62 && st.media_length_mm == 0;
     const bool ready = st.error1 == 0 && st.error2 == 0 &&
                        st.media_type != 0 && st.phase_type == 0;
     char body[512];
@@ -772,10 +773,34 @@ static bool ql700_send_to_usb(void *ctx, const uint8_t *data, size_t size)
     return pt_transport_send(transport, data, size) == (int)size;
 }
 
+/* Allocate large shipping-label raster buffers from PSRAM first. The
+ * ESP32-S3 N16R8 target has 8 MB octal PSRAM; keeping the full HTTP body
+ * there avoids consuming scarce internal RAM while the printer job is sent.
+ * Internal 8-bit RAM is a fallback for smaller jobs or boards without PSRAM. */
+static uint8_t *ql700_alloc_bitmap(size_t bytes)
+{
+    uint8_t *bitmap = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (bitmap) {
+        ESP_LOGD(TAG, "Allocated %u-byte QL-700 bitmap in PSRAM", (unsigned)bytes);
+        return bitmap;
+    }
+
+    ESP_LOGW(TAG, "PSRAM allocation of %u bytes failed (largest PSRAM block: %u); trying internal RAM",
+             (unsigned)bytes,
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    bitmap = heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!bitmap) {
+        ESP_LOGE(TAG, "Raster allocation failed: requested %u bytes, largest internal block: %u",
+                 (unsigned)bytes,
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    }
+    return bitmap;
+}
+
 /* QL-700 bitmap endpoint for DK-22205 62 mm continuous stock.
- * Body: 360..1500 rows, each 90 bytes, MSB-first head dots. The full
- * body is received before the printer is touched, so a client
- * disconnect during upload cannot leave a partial job in the printer.
+ * Body: 360..2952 rows (up to approximately 250 mm), each 90 bytes,
+ * MSB-first head dots. The full body is received before the printer is
+ * touched, so a client disconnect cannot leave a partial job in the printer.
  */
 static esp_err_t api_ql700_bitmap_print(httpd_req_t *req)
 {
@@ -805,7 +830,7 @@ static esp_err_t api_ql700_bitmap_print(httpd_req_t *req)
             "{\"ok\":false,\"error\":\"ql700_not_connected\"}");
     }
 
-    uint8_t *bitmap = malloc(body_len);
+    uint8_t *bitmap = ql700_alloc_bitmap(body_len);
     if (!bitmap) {
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_sendstr(req,
@@ -816,26 +841,26 @@ static esp_err_t api_ql700_bitmap_print(httpd_req_t *req)
         int n = httpd_req_recv(req, (char *)bitmap + received,
                                body_len - received);
         if (n <= 0) {
-            free(bitmap);
+            heap_caps_free(bitmap);
             /* No print commands have been sent. */
             return ESP_FAIL;
         }
         received += (size_t)n;
     }
     if (!PRINTER_LOCK(150000)) {
-        free(bitmap);
+        heap_caps_free(bitmap);
         httpd_resp_set_status(req, "503 Service Unavailable");
         return httpd_resp_sendstr(req,
             "{\"ok\":false,\"error\":\"busy\"}");
     }
     ql700_status_t st = {0};
     const bool ready = ql700_query_status(&st) &&
-        st.media_type == 0x4a && st.media_width_mm == 62 &&
+        st.media_type == 0x0a && st.media_width_mm == 62 &&
         st.media_length_mm == 0 && st.error1 == 0 &&
         st.error2 == 0 && st.phase_type == 0;
     if (!ready) {
         PRINTER_UNLOCK();
-        free(bitmap);
+        heap_caps_free(bitmap);
         httpd_resp_set_status(req, "409 Conflict");
         return httpd_resp_sendstr(req,
             "{\"ok\":false,\"error\":\"requires_idle_62mm_continuous_roll\"}");
@@ -847,7 +872,7 @@ static esp_err_t api_ql700_bitmap_print(httpd_req_t *req)
         ql700_send_to_usb, &s_transport, bitmap, (uint16_t)rows);
     pt_led_set(transport_ready() ? PT_LED_READY : PT_LED_USB_WAITING);
     PRINTER_UNLOCK();
-    free(bitmap);
+    heap_caps_free(bitmap);
     if (!sent) {
         httpd_resp_set_status(req, "502 Bad Gateway");
         return httpd_resp_sendstr(req,
@@ -905,7 +930,7 @@ static esp_err_t api_ql700_testprint(httpd_req_t *req)
     /* Explicitly require known continuous 62mm stock, and idle printer.
      * Die-cut and other width rolls need their own raster geometry.
      */
-    if (st.media_type != 0x4a || st.media_width_mm != 62 ||
+    if (st.media_type != 0x0a || st.media_width_mm != 62 ||
         st.media_length_mm != 0 || st.error1 != 0 || st.error2 != 0 ||
         st.phase_type != 0) {
         PRINTER_UNLOCK();

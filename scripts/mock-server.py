@@ -37,7 +37,7 @@ STATE = {
     "printer":        "QL-700",
     "media_width_mm": 62,
     "media_length_mm": 0,
-    "media_type":     0x4A,
+    "media_type":     0x0A,
     "media_kind":     "continuous",
     "error1":         0,
     "error2":         0,

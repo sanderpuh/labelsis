@@ -26,11 +26,12 @@ static bool fail_write(void *unused, const uint8_t *data, size_t len)
 int main(void)
 {
     const unsigned n = QL700_BITMAP_MIN_ROWS;
-    const size_t body_size = (size_t)n * QL700_ROW_BYTES;
+    const unsigned max_n = QL700_BITMAP_MAX_ROWS;
+    const size_t body_size = (size_t)max_n * QL700_ROW_BYTES;
     uint8_t *page = malloc(body_size);
     assert(page);
     memset(page, 0xff, body_size);
-    wire_cap = 400 + (size_t)(n + 1) * (QL700_ROW_BYTES + 3);
+    wire_cap = 400 + (size_t)(max_n + 1) * (QL700_ROW_BYTES + 3);
     wire = malloc(wire_cap);
     assert(wire);
     assert(!ql700_send_bitmap_page_62mm(NULL, NULL, page, n));
@@ -51,6 +52,16 @@ int main(void)
     assert(wire[start+5] == 0xff); /* printable area preserved */
     assert(wire[start+3+88] == 0xf0);
     assert(wire[start+3+89] == 0x00);
+    assert(wire[wire_len-1] == 0x1a);
+
+    /* The configured 250 mm ceiling is accepted at its exact row limit. */
+    wire_len = 0;
+    writes = 0;
+    assert(ql700_send_bitmap_page_62mm(collect, NULL, page, max_n));
+    assert(writes == max_n + 8);
+    assert(wire_len == 200 + 2 + 13 + 4 + 4 + 4 + 5 + 93*max_n + 1);
+    assert(wire[209] == (max_n & 255));
+    assert(wire[210] == (max_n >> 8));
     assert(wire[wire_len-1] == 0x1a);
     free(page); free(wire);
     puts("QL-700 bitmap encoder tests passed");

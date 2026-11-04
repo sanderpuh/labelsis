@@ -10,7 +10,7 @@ int main(void)
 
     /* 62 mm continuous DK roll (DK-22205). */
     raw[10] = 62;
-    raw[11] = 0x4a;
+    raw[11] = 0x0a;
     raw[17] = 0;
     assert(ql700_status_decode(raw, sizeof raw, &s));
     assert(s.media_width_mm == 62 && s.media_length_mm == 0);
@@ -19,7 +19,7 @@ int main(void)
 
     /* 29 x 90 mm die-cut roll, cover open. */
     raw[10] = 29;
-    raw[11] = 0x4b;
+    raw[11] = 0x0b;
     raw[17] = 90;
     raw[9] = 0x10;
     raw[18] = 0x02;
