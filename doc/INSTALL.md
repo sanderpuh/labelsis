@@ -1,13 +1,13 @@
 # Install
 
-Flash a fresh ESP32-S3 DevKitC-1 from VSCode using PlatformIO. See [HARDWARE.md](HARDWARE.md) for cabling.
+Flash the ESP32-S3FH4R2 Super Mini from VSCode using PlatformIO. See [HARDWARE.md](HARDWARE.md) for USB and VBUS requirements.
 
 ## First flash
 
 1. Open this repository in VSCode with the PlatformIO extension installed.
 2. (Optional) Copy `main/wifi_credentials.example.h` to `main/wifi_credentials.h` and set `WIFI_SSID` and `WIFI_PASSWORD`. Without this file, the device starts the `labelsis-setup` captive portal.
 3. Select the `ql700` PlatformIO environment.
-4. Connect the DevKitC-1's **left UART USB-C** port to your PC and click **Build**, then **Upload**.
+4. Connect the Super Mini's **USB-C** port to your PC and click **Build**, then **Upload**. Disconnect the printer/host adapter from that shared USB connection while flashing.
 5. Open **PlatformIO: Serial Monitor** at 115200 baud.
 
 CLI equivalents from the repository root:
@@ -28,4 +28,4 @@ If `main/wifi_credentials.h` is absent or the configured network cannot be reach
 
 ## Status LED and BOOT button
 
-The DevKitC-1 onboard RGB pixel (GPIO 48) indicates boot, Wi-Fi connection, printer readiness, printing and errors. The BOOT button (GPIO 0) has two runtime gestures: hold for 2–30 seconds and release to toggle the OTA gate; hold for 30 seconds without releasing to wipe Wi-Fi credentials and reboot into setup mode.
+The Super Mini onboard RGB pixel (GPIO 48) indicates boot, Wi-Fi connection, printer readiness, printing and errors. The BOOT button (GPIO 0) has two runtime gestures: hold for 2–30 seconds and release to toggle the OTA gate; hold for 30 seconds without releasing to wipe Wi-Fi credentials and reboot into setup mode.

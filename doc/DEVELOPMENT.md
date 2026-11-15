@@ -3,7 +3,8 @@
 ## Project layout
 
 - `main/` -- firmware entry point and optional Wi-Fi credentials header.
-- `boards/devkitc_s3/` -- the single supported ESP32-S3 DevKitC-1 board definition, partition layout and SDK defaults.
+- `boards/s3_supermini_fh4r2/` -- the active ESP32-S3FH4R2 Super Mini board definition, 4 MB dual-OTA partition layout and quad-PSRAM SDK defaults.
+- `boards/devkitc_s3/` -- retained reference profile for the original 16 MB N16R8 DevKitC-1.
 - `components/pt_app/` -- Wi-Fi onboarding, HTTP API, OTA handling and embedded web app.
 - `components/ql700_protocol/` -- QL-700 status decoding and raster command generation.
 - `components/pt_transport/` -- the USB byte transport and ESP32-S3 USB Host backend.

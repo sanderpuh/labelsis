@@ -1,0 +1,8 @@
+# ESP32-S3FH4R2 Super Mini -- 4 MB flash, dual-slot OTA.
+# OTA slots are equal and 64 KB aligned; each application must fit in 1.875 MiB.
+# Name,    Type, SubType, Offset,   Size,
+nvs,       data, nvs,     0x9000,   0x6000,
+phy_init,  data, phy,     0xf000,   0x1000,
+otadata,  data, ota,     0x10000,  0x2000,
+ota_0,     app,  ota_0,   0x20000,  0x1E0000,
+ota_1,     app,  ota_1,   0x200000, 0x1E0000,

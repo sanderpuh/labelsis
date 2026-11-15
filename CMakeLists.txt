@@ -22,7 +22,7 @@ if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/.git/HEAD")
         "${CMAKE_CURRENT_LIST_DIR}/.git/index")
 endif()
 
-set(BOARD_DIR "${CMAKE_CURRENT_LIST_DIR}/boards/devkitc_s3")
+set(BOARD_DIR "${CMAKE_CURRENT_LIST_DIR}/boards/s3_supermini_fh4r2")
 list(APPEND SDKCONFIG_DEFAULTS
     "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults"
     "${BOARD_DIR}/sdkconfig.defaults")

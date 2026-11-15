@@ -4,7 +4,7 @@
 
 #include "pt_app.h"
 
-/* ESP32-S3 DevKitC-1 pin and LED assignments. */
+/* ESP32-S3FH4R2 Super Mini pin and LED assignments. */
 #include "board.h"
 
 /* Real Wi-Fi creds, gitignored -- copy main/wifi_credentials.example.h
@@ -30,7 +30,7 @@ void app_main(void)
         .http_port              = 80,
         .usb_connect_timeout_ms = 5000,
         .reset_gpio_num         = BOARD_RESET_GPIO,
-        /* Status LED is the DevKitC-1 onboard RGB pixel (GPIO 48). */
+        /* Status LED is the Super Mini onboard RGB pixel (GPIO 48). */
         .led = {
             .type       = BOARD_LED_TYPE,
             .gpio       = BOARD_LED_GPIO,

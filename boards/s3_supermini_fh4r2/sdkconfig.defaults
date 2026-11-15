@@ -1,0 +1,20 @@
+# ESP32-S3FH4R2 Super Mini board profile.
+# In-package memory: 4 MB Quad-SPI flash + 2 MB Quad-SPI PSRAM.
+
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="boards/s3_supermini_fh4r2/partitions.csv"
+
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# Bluetooth controller + NimBLE host compiled in but unused, matching the
+# original profile and preserving the project's existing feature configuration.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
