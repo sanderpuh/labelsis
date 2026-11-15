@@ -1,12 +1,12 @@
-# LabelSis
+# LabelPrinter
 
 Network print server for the **Brother QL-700** label printer, running on an **ESP32-S3** with a self-hosted browser-based label designer.
 
-![Screenshot of the LabelSis label designer](doc/Screenshot.png)
+![Screenshot of the LabelPrinter label designer](doc/Screenshot.png)
 
 ## What it does
 
-Connect the ESP32-S3 DevKitC-1 to the QL-700's USB-B port, flash the firmware from PlatformIO, and use the printer over your local network at `http://labelsis.local/`. No desktop driver, cloud account, or companion app is required.
+Connect the ESP32-S3 DevKitC-1 to the QL-700's USB-B port, flash the firmware from PlatformIO, and use the printer over your local network at `http://labelprinter.local/`. No desktop driver, cloud account, or companion app is required.
 
 - Browser-based designer for text, images, barcodes, QR codes, icons, rectangles and CSV-templated batch labels.
 - Wi-Fi captive-portal onboarding and storage for up to four wireless networks.
@@ -31,7 +31,7 @@ pio run -e ql700 -t upload
 pio device monitor -e ql700
 ```
 
-Copy `main/wifi_credentials.example.h` to `main/wifi_credentials.h` and enter your Wi-Fi credentials before building, or leave it absent and use the `labelsis-setup` onboarding network. The `ql700` PlatformIO environment uses the ESP-IDF framework provided by PlatformIO; the repository no longer maintains a separate standalone `idf.py` build workflow.
+Copy `main/wifi_credentials.example.h` to `main/wifi_credentials.h` and enter your Wi-Fi credentials before building, or leave it absent and use the `labelprinter-setup` onboarding network. The `ql700` PlatformIO environment uses the ESP-IDF framework provided by PlatformIO; the repository no longer maintains a separate standalone `idf.py` build workflow.
 
 See [Install](doc/INSTALL.md) for first flash instructions.
 
