@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Single-file mock of the LabelSis firmware HTTP API.
+Single-file mock of the LabelPrinter firmware HTTP API.
 
 Serves the SPA from disk and replies to /api/* with sensible fake
 values so the web UI can be developed without flashing the ESP or
@@ -67,6 +67,10 @@ WIFI_APS = [
 WIFI_LAST_USED = "Home Wi-Fi"
 WIFI_PRESCAN   = False
 WIFI_MAX       = 4         # mirror MAX_APS in pt_app.c
+
+# Keep the mock print limits aligned with the QL-700 bitmap endpoint.
+QL700_MIN_ROWS = 150   # 12.7 mm at 300 DPI
+QL700_MAX_ROWS = 2952  # approximately 250 mm at 300 DPI
 
 CORS = {
     "Access-Control-Allow-Origin":  "*",
@@ -254,8 +258,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(400, {"ok": False, "error": "invalid_90_byte_raster_length"})
                 return
             rows = length // 90
-            if not 360 <= rows <= 1500:
-                self._send_json(400, {"ok": False, "error": "invalid_raster_rows"})
+            if not QL700_MIN_ROWS <= rows <= QL700_MAX_ROWS:
+                self._send_json(400, {
+                    "ok": False,
+                    "error": "invalid_raster_rows",
+                    "min_rows": QL700_MIN_ROWS,
+                    "max_rows": QL700_MAX_ROWS,
+                })
                 return
             if not (STATE["ready"] and STATE["print_supported"]):
                 self._send_json(409, {"ok": False, "error": "requires_idle_62mm_continuous_roll"})
@@ -374,7 +383,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    p = argparse.ArgumentParser(description="LabelSis mock HTTP server")
+    p = argparse.ArgumentParser(description="LabelPrinter mock HTTP server")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--bind", default="127.0.0.1",
                    help="interface to bind (use 0.0.0.0 for LAN access)")

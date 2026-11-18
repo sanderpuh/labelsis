@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LabelSis</title>
+<title>LabelPrinter</title>
 <style>
 /* Material Icons (filled) -- Apache-2.0, (c) Google,
  * https://github.com/marella/material-icons.
@@ -48,41 +48,65 @@ nav a:hover { color:var(--fg); }
 .burger { display:none; background:transparent; border:0; cursor:pointer; padding:.4rem; margin-left:auto; }
 .burger span { display:block; width:22px; height:2px; background:var(--fg); margin:4px 0; border-radius:1px; }
 main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-direction:column; gap:1rem; }
-/* view-print holds two column wrappers (col-left, col-right). Each
- * column flows independently as its own flex stack -- so a tall
- * Layers list in col-right doesn't push Props in col-left down,
- * which the previous grid layout did. On narrow viewports both
- * columns stack into one column via natural source order: Design,
- * Props, Layers, CSV. */
-/* :not([hidden]) keeps the higher-specificity ID rule from
- * overriding the user-agent [hidden]{display:none} when the view
- * switcher hides this section. */
+/* The top-level Label / Settings navigation remains separate from
+ * these three focused label workflows. Each workflow gets its own
+ * pane so mobile users never have Custom, Address and Shipping
+ * controls stacked into one long screen. */
 #view-print:not([hidden]),
 #view-settings:not([hidden]),
-#view-status:not([hidden])   { display:flex; flex-direction:column; gap:1rem; }
-#view-print > .col-left,
-#view-print > .col-right { display:flex; flex-direction:column; gap:1rem; }
-/* 2-column layout kicks in at >= 900 px so tablet-landscape
- * (~1024x768, ~1180x820) and small desktops both get the side-by-
- * side view. Below that, columns stack via natural source order:
- * Design -> Props -> Layers -> CSV. */
+#view-status:not([hidden]) { display:flex; flex-direction:column; gap:.85rem; }
+.label-mode-tabs {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:.35rem;
+  padding:.2rem;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--panel);
+  position:sticky;
+  top:0;
+  z-index:8;
+}
+.label-mode-tab {
+  min-width:0;
+  min-height:44px;
+  padding:.55rem .35rem;
+  border:1px solid transparent;
+  border-radius:6px;
+  background:transparent;
+  color:var(--muted);
+  font-weight:600;
+  line-height:1.15;
+  white-space:normal;
+}
+.label-mode-tab[aria-selected="true"] {
+  color:var(--fg);
+  background:rgba(88,166,255,.16);
+  border-color:var(--accent);
+}
+.label-mode-pane:not([hidden]) { display:flex; flex-direction:column; gap:1rem; min-width:0; }
+#label-mode-custom > .col-left,
+#label-mode-custom > .col-right { display:flex; flex-direction:column; gap:1rem; min-width:0; }
+.address-layout { display:flex; flex-direction:column; gap:1rem; align-items:stretch; }
+.address-fields { display:flex; flex-direction:column; gap:.55rem; }
+.address-field { display:grid; grid-template-columns:6.5rem minmax(0,1fr); gap:.55rem; align-items:center; }
+.address-field label { color:var(--muted); }
+.address-field input { width:100%; min-width:0; }
+.address-preview-frame { width:100%; padding:.6rem; border:1px solid var(--line); border-radius:6px; background:#e9ecef; overflow:hidden; }
+#address-preview { display:block; width:100%; height:auto; border:1px solid #c8cdd3; background:#fff; image-rendering:auto; }
+.address-preview-meta { display:flex; justify-content:space-between; align-items:center; gap:.5rem; flex-wrap:wrap; margin-top:.55rem; }
+.address-print-row { margin-top:.8rem; }
+#address-print-status { flex:1 1 12rem; min-width:0; }
+#shipping-import-panel { width:100%; }
+.shipping-pane { width:100%; max-width:980px; margin:0 auto; }
+.shipping-pane h2 { margin:0 0 .75rem; }
+/* :not([hidden]) is deliberately applied to panes, not their parent,
+ * so the browser's native [hidden] behaviour remains authoritative. */
 @media (min-width: 900px) {
   main { max-width:1280px; }
-  #view-print:not([hidden])              { flex-direction:row; align-items:flex-start; }
-  #view-print > .col-left  { flex:1 1 0;        min-width:0; }
-  /* Right column shares the viewport with col-left. flex-basis is
-   * a clamp() so it stays usable on small landscape tablets
-   * (>=300 px) but doesn't hog space on wide screens (up to
-   * ~520 px). flex:0 1 lets the basis shrink under pressure
-   * (very narrow desktops), while min-width:0 prevents min-content
-   * sizing of the textarea from inflating the column. No internal
-   * overflow / resize -- the column grows with its content and
-   * the page itself scrolls if everything together is taller than
-   * the viewport. */
-  #view-print > .col-right {
-    flex: 0 1 clamp(300px, 32%, 520px);
-    min-width: 0;
-  }
+  #label-mode-custom:not([hidden]) { flex-direction:row; align-items:flex-start; }
+  #label-mode-custom > .col-left { flex:1 1 0; min-width:0; }
+  #label-mode-custom > .col-right { flex:0 1 clamp(300px,32%,520px); min-width:0; }
 }
 .panel, .panel h2, .panel p { overflow-wrap:anywhere; }
 #tpl-panel code, #csv > div { word-break:break-word; overflow-wrap:anywhere; }
@@ -107,9 +131,8 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 }
 .tpl-vars dt, .tpl-vars dd { margin:0; }
 .tpl-vars dt code { font-size:.8rem; white-space:nowrap; }
-/* Shipping-label import is a collapsible sibling of Template & CSV data. */
-#shipping-import-panel > summary { cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
-.shipping-import-content { margin-top:.75rem; }
+/* Shipping-label import has its own workflow tab. */
+.shipping-import-content { margin-top:.25rem; }
 .shipping-pdf-preview { margin-top:.65rem; padding:.5rem; border:1px solid var(--line); border-radius:4px; background:#fff; overflow:auto; }
 .shipping-pdf-stage { position:relative; width:max-content; max-width:100%; margin:72px auto; user-select:none; }
 #shipping-pdf-canvas { display:block; max-width:100%; height:auto; pointer-events:none; }
@@ -142,10 +165,9 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
  * controls so they don't take a separate row underneath. */
 .panel-header { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-bottom:.5rem; }
 .panel-header h2 { margin:0; }
-/* display:contents lets the .more-row span participate in the
- * .panel-header flex without forming its own box -- children flow
- * inline. On phone the same rule with display:none collapses the
- * file-op buttons under the ... overflow. */
+/* On desktop the saved-label buttons join the header's flex flow.
+ * On phones the group becomes its own wrapping grid so every action
+ * remains visible instead of being hidden behind the toolbar overflow. */
 .inline-actions { display:contents; }
 .row { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
 /* Common row utilities -- extracted from repeating inline styles. */
@@ -166,6 +188,20 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
  * so x/size/rotation/text/etc. all start at the same x position. */
 .row.pair { display:grid; grid-template-columns:80px minmax(0, 1fr) auto minmax(0, 1fr); gap:.5rem; align-items:center; }
 .row.pair > input { min-width:0; }
+/* Paired property controls use the same three-column grid in both rows.
+ * The middle track is the divider, so it stays vertically aligned between
+ * size/rotation and flip/blend even when the controls have different widths. */
+.props-control-row { display:grid; grid-template-columns:minmax(0,1fr) 1px minmax(0,1fr); column-gap:.25rem; align-items:stretch; min-width:0; }
+.props-control-group { display:flex; flex-direction:column; justify-content:flex-start; gap:.22rem; min-width:0; }
+.props-control-group > label { font-size:.76rem; line-height:1.2; }
+.props-control-fields { display:flex; align-items:center; gap:.2rem; min-width:0; flex-wrap:nowrap; }
+.props-control-divider { width:1px; min-width:1px; align-self:stretch; min-height:34px; background:var(--line); margin:0; }
+.mini-prop-input { flex:0 0 48px !important; width:48px; min-width:0 !important; max-width:48px; padding:.4rem .25rem !important; text-align:center; }
+.props-control-fields .aspect-lock { flex:0 0 26px; width:26px; min-width:26px; padding:.38rem 0; }
+.quick-rotate { flex:0 0 32px; width:32px; min-width:32px; padding:.4rem 0; text-align:center; }
+.flip-button { flex:0 0 34px; width:34px; min-width:34px; padding:.4rem 0; text-align:center; }
+.props-control-group.blend-group { min-width:0; }
+.props-control-group.blend-group select { width:100%; min-width:0; }
 /* Form-aligned panels: pin every row's leading label to a fixed
  * gutter so labels read down the left edge as a tidy column and
  * inputs / buttons flow uniformly to the right. Applies to the
@@ -234,6 +270,15 @@ button.secondary[aria-pressed="true"], button.secondary.toggled { background:var
   width:2rem; height:2rem;
   border:1px solid var(--line); border-radius:4px; background:var(--bg);
 }
+/* Compact text controls: font, style and effective font height share one row. */
+.font-settings { margin-top:.65rem; padding-top:.65rem; border-top:1px solid var(--line); }
+.font-settings-title { margin:0 0 .4rem; color:var(--muted); font-size:.78rem; font-weight:600; text-transform:uppercase; letter-spacing:.045em; }
+.font-settings-grid { display:grid; grid-template-columns:minmax(0,1fr) auto 58px; gap:.35rem; align-items:end; min-width:0; max-width:300px; }
+.font-settings-field { display:flex; flex-direction:column; gap:.2rem; min-width:0; }
+.font-settings-field > label { font-size:.74rem; line-height:1.2; white-space:nowrap; }
+.font-style-buttons { display:flex; align-items:center; gap:3px; }
+.font-style-buttons .text-style { width:24px; min-width:24px; padding:.4rem 0; text-align:center; }
+.font-settings-field.font-size-field input { width:100%; min-width:0; max-width:none; }
 /* Text style toggles render their own state in the glyph (B in
  * bold, I in italic, etc.) so users can preview without trying. */
 .text-style       { min-width:38px; text-align:center; padding:.5rem .6rem; }
@@ -261,7 +306,7 @@ canvas { display:block; image-rendering:pixelated; background:#fff; }
 .about-licenses dd  { margin:0 0 .5rem 1rem; color:var(--muted); }
 /* About panel header: title on the left, app icon top-right. The
  * icon doubles as a homepage link; same destination as the inline
- * "LabelSis" link in the body but more visually anchored. */
+ * "LabelPrinter" link in the body but more visually anchored. */
 .about-header     { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin-bottom:.5rem; }
 .about-icon-link  { flex-shrink:0; line-height:0; opacity:.92; transition:opacity .15s; }
 .about-icon-link:hover { opacity:1; }
@@ -377,6 +422,24 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 #el-list .summary { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dim  { opacity:.6; }
 .phone-only { display:none; }
+/* Keep the canvas preview proportional and smoothly scaled across viewport
+ * widths. The old 600px breakpoint removed the explicit canvas size just
+ * above phone width, making the preview jump back to its 600px intrinsic size.
+ * This interpolation eases from the phone maximum (500px tall) to the desktop
+ * maximum (380px tall) without a discontinuity at a media-query boundary. */
+#preview { height:min(62vh, clamp(380px, calc(740px - 40vw), 500px)); width:auto; max-width:none; }
+.canvas-viewport { max-height:64vh; }
+/* On wide screens the editor properties live in the narrow right column,
+ * beside the preview and above the template / CSV controls. */
+@media (min-width: 900px) {
+  #props-panel {
+    position:sticky;
+    top:.75rem;
+    max-height:calc(100vh - 1.5rem);
+    overflow-y:auto;
+    overscroll-behavior:contain;
+  }
+}
 @media (max-width: 600px) {
   .burger { display:block; }
   nav { display:none; position:absolute; top:100%; left:0; right:0; flex-direction:column; background:var(--panel); border-bottom:1px solid var(--line); padding:.5rem; z-index:10; gap:0; }
@@ -409,12 +472,58 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
     display:inline-flex; align-items:center; gap:.4rem;
     min-height:44px; padding:.25rem .25rem .25rem 0;
   }
+  main { padding:.65rem; gap:.7rem; }
+  .panel { padding:.75rem; }
+  .panel-header { align-items:center; }
+  .panel-header > .spacer { display:none; }
+  .panel-header > #lib-select { flex:1 1 150px; min-width:0; }
+  .panel-header .library-actions {
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(64px,1fr));
+    flex:1 0 100%;
+    width:100%;
+    gap:.35rem;
+  }
+  .panel-header .library-actions > button {
+    width:100%; min-width:0; min-height:44px;
+    padding:.45rem .2rem; font-size:.75rem; line-height:1.1;
+    white-space:nowrap;
+  }
+  .label-mode-tabs { gap:.2rem; }
+  .label-mode-tab { padding:.6rem .2rem; font-size:.82rem; }
+  #label-mode-custom:not([hidden]),
+  #label-mode-address:not([hidden]),
+  #label-mode-shipping:not([hidden]) { gap:.7rem; }
+  #label-mode-custom > .col-left,
+  #label-mode-custom > .col-right { gap:.7rem; }
+  .address-layout { gap:.7rem; }
+  .address-field { grid-template-columns:5.3rem minmax(0,1fr); }
+  .address-preview-frame { padding:.4rem; }
+  .shipping-pdf-preview { max-height:58vh; }
+  .shipping-pdf-stage { margin:1.5rem auto; }
+  .font-settings-grid { grid-template-columns:minmax(0,1fr) auto 54px; gap:.3rem; max-width:100%; }
+  .font-style-buttons { gap:2px; }
+  .font-style-buttons .text-style { width:23px; min-width:23px; }
+  .props-control-row { column-gap:.2rem; }
+  .props-control-divider { margin:0; }
+  .add-tools-row { column-gap:.3rem; row-gap:.25rem; }
+  .add-tools-row > button[id^="add-"] {
+    flex:0 0 auto; min-width:0; min-height:44px;
+    padding:.5rem .25rem; font-size:.74rem; line-height:1.1;
+    white-space:nowrap;
+  }
+  .add-tools-row > .spacer { display:none; }
+  .add-tools-row #phone-more { margin-left:auto; min-width:36px; padding:.35rem .4rem; }
+}
+@media (max-width: 380px) {
+  .props-control-row { grid-template-columns:minmax(0,1fr) 1px minmax(0,1fr); column-gap:.15rem; }
+  .props-control-fields { gap:.15rem; }
 }
 </style>
 </head>
 <body>
 <header>
-  <h1 id="title" title="click to toggle status">LabelSis</h1>
+  <h1 id="title" title="click to toggle status">LabelPrinter</h1>
   <nav id="nav">
     <a href="#status"   data-view="status"   data-i18n="tab.status" class="burger-only">Status</a>
     <a href="#print"    data-view="print"    data-i18n="tab.label" class="active">Label</a>
@@ -430,14 +539,14 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <div class="about-header">
         <h2 data-i18n="panel.about" style="margin:0;">About</h2>
         <a href="https://github.com/sanderpuh/labelsis" target="_blank" rel="noopener"
-           class="about-icon-link" aria-label="LabelSis homepage"
+           class="about-icon-link" aria-label="LabelPrinter homepage"
            data-i18n-attr="title:about.icon.tooltip"
-           title="LabelSis -- open the project page on GitHub">
-          <img class="about-icon" alt="LabelSis"
+           title="LabelPrinter -- open the project page on GitHub">
+          <img class="about-icon" alt="LabelPrinter"
                src="__LABELSIS_ICON_DATA_URL__">
         </a>
       </div>
-      <p class="muted"><a class="about-link" href="https://github.com/sanderpuh/labelsis" target="_blank" rel="noopener">LabelSis</a> <span data-i18n="about.intro">- network print server for the Brother QL-700, running on an ESP32-S3 with a self-hosted web UI.</span></p>
+      <p class="muted"><a class="about-link" href="https://github.com/sanderpuh/labelsis" target="_blank" rel="noopener">LabelPrinter</a> <span data-i18n="about.intro">- network print server for the Brother QL-700, running on an ESP32-S3 with a self-hosted web UI.</span></p>
       <p class="muted"><span data-i18n="about.firmware">Firmware</span>: <span id="about-fw-version">…</span></p>
       <p class="muted" data-i18n="about.licenses">Third-party components bundled with this firmware:</p>
       <dl class="about-licenses">
@@ -465,7 +574,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
          reboot countdown. -->
     <div class="panel" id="ota-panel" hidden>
       <h2 data-i18n="panel.ota">Firmware update</h2>
-      <p class="muted" data-i18n="ota.help">OTA gate is open (printer in Editor Lite mode, or BOOT button toggled). Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.</p>
+      <p class="muted" data-i18n="ota.help">OTA gate is open (printer in Editor Lite mode, or BOOT button toggled). Pick a LabelPrinter firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.</p>
       <div class="row">
         <input id="ota-file" type="file" accept=".bin,application/octet-stream">
         <button id="ota-upload" class="secondary" type="button" disabled data-i18n="btn.ota.upload">install</button>
@@ -480,6 +589,19 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
     </div>
   </section>
   <section id="view-print">
+   <div class="label-mode-tabs" role="tablist" aria-label="Label type">
+    <button class="label-mode-tab" id="label-mode-tab-custom" type="button" role="tab"
+            aria-controls="label-mode-custom" aria-selected="true" data-label-mode="custom"
+            data-i18n="label.mode.custom">Custom label</button>
+    <button class="label-mode-tab" id="label-mode-tab-address" type="button" role="tab"
+            aria-controls="label-mode-address" aria-selected="false" data-label-mode="address"
+            data-i18n="label.mode.address">Address label</button>
+    <button class="label-mode-tab" id="label-mode-tab-shipping" type="button" role="tab"
+            aria-controls="label-mode-shipping" aria-selected="false" data-label-mode="shipping"
+            data-i18n="label.mode.shipping">Shipping label</button>
+   </div>
+
+   <div class="label-mode-pane" id="label-mode-custom" role="tabpanel" aria-labelledby="label-mode-tab-custom">
    <div class="col-left">
     <div class="panel">
       <div class="panel-header">
@@ -488,7 +610,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <option value="" data-i18n="lib.option.placeholder">- load saved label -</option>
         </select>
         <span class="spacer"></span>
-        <span class="more-row inline-actions">
+        <span class="library-actions inline-actions">
           <button id="lib-save"   class="secondary" type="button" data-i18n="lib.btn.save">save as</button>
           <button id="lib-update" class="secondary" type="button" disabled data-i18n="lib.btn.update">update</button>
           <button id="lib-delete" class="secondary" type="button" disabled data-i18n="lib.btn.delete">delete</button>
@@ -542,7 +664,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         </select>
       </div>
       <!-- Group: add tools -->
-      <div class="row group-start" style="margin-top:.75rem">
+      <div class="row group-start add-tools-row" style="margin-top:.75rem">
         <button id="add-text"    class="secondary" type="button" data-i18n="btn.add.text">+ text</button>
         <button id="add-image"   class="secondary" type="button" data-i18n="btn.add.image">+ image</button>
         <input  id="image-file"  type="file" accept="image/*" hidden>
@@ -554,7 +676,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="phone-more" class="secondary phone-only" type="button" aria-expanded="false" aria-controls="more-rows" aria-label="show more actions" data-i18n-attr="title:btn.more" title="show more actions">⋯</button>
       </div>
       <!-- Group: element modifiers (collapsed on phone) -->
-      <div class="row more-row group-start" style="margin-top:.5rem">
+      <div class="row more-row group-start" id="more-rows" style="margin-top:.5rem">
         <button id="el-dup"    class="secondary" type="button" disabled title="Ctrl+D" data-i18n="btn.duplicate">duplicate</button>
         <button id="el-delete" class="secondary" type="button" disabled title="Del"    data-i18n="btn.delete">delete</button>
         <span class="spacer"></span>
@@ -570,6 +692,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <div id="log"></div>
     </div>
 
+   </div><!-- /col-left -->
+
+   <div class="col-right">
     <div class="panel" id="props-panel">
       <h2 id="props-title" data-i18n="panel.element">Element</h2>
       <div id="props-empty" class="muted" data-i18n="panel.props.empty">Click an element on the canvas to edit it, or hit + text to add one.</div>
@@ -578,32 +703,32 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           <label data-i18n="field.text">text</label>
           <input id="text-content" type="text" placeholder='Type text - use {column} for CSV substitution'>
         </div>
-        <div class="row">
-          <label data-i18n="field.font">font</label>
-          <div class="font-picker">
-            <button id="font-trigger" class="font-trigger" type="button"
-                    aria-haspopup="listbox" aria-expanded="false"
-                    aria-label="font family">sans-serif</button>
-            <div id="font-list" class="font-list" role="listbox"></div>
+        <div class="font-settings">
+          <h3 class="font-settings-title" data-i18n="panel.font-settings">Font settings</h3>
+          <div class="font-settings-grid">
+            <div class="font-settings-field">
+              <label data-i18n="field.font">font</label>
+              <div class="font-picker">
+                <button id="font-trigger" class="font-trigger" type="button"
+                        aria-haspopup="listbox" aria-expanded="false"
+                        aria-label="font family">sans-serif</button>
+                <div id="font-list" class="font-list" role="listbox"></div>
+              </div>
+            </div>
+            <div class="font-settings-field">
+              <label data-i18n="field.style">style</label>
+              <div class="font-style-buttons">
+                <button id="text-bold"      class="secondary text-style" type="button" aria-pressed="false" aria-label="bold" title="bold (Ctrl+B)">B</button>
+                <button id="text-italic"    class="secondary text-style" type="button" aria-pressed="false" aria-label="italic" title="italic (Ctrl+I)"><i>I</i></button>
+                <button id="text-underline" class="secondary text-style" type="button" aria-pressed="false" aria-label="underline" title="underline (Ctrl+U)"><u>U</u></button>
+                <button id="text-strike"    class="secondary text-style" type="button" aria-pressed="false" aria-label="strikethrough" title="strikethrough"><s>S</s></button>
+              </div>
+            </div>
+            <div class="font-settings-field font-size-field">
+              <label data-i18n="field.font-px">font dots</label>
+              <input id="text-size" type="number" min="1" max="500" step="1" value="80" class="compact-input">
+            </div>
           </div>
-        </div>
-        <!-- labelsis-fonts-combined-v0.7 -->
-        <div class="row">
-          <label>local fonts</label>
-          <button id="font-discover-local" class="secondary" type="button"
-                  title="Ask permission to list fonts installed on this computer">Load installed fonts</button>
-          <span id="font-discover-status" class="muted" aria-live="polite"></span>
-        </div>
-        <div class="row">
-          <label data-i18n="field.style">style</label>
-          <button id="text-bold"      class="secondary text-style" type="button" aria-pressed="false" aria-label="bold"          title="bold (Ctrl+B)">B</button>
-          <button id="text-italic"    class="secondary text-style" type="button" aria-pressed="false" aria-label="italic"        title="italic (Ctrl+I)"><i>I</i></button>
-          <button id="text-underline" class="secondary text-style" type="button" aria-pressed="false" aria-label="underline"     title="underline (Ctrl+U)"><u>U</u></button>
-          <button id="text-strike"    class="secondary text-style" type="button" aria-pressed="false" aria-label="strikethrough" title="strikethrough"><s>S</s></button>
-        </div>
-        <div class="row">
-          <label data-i18n="field.font-px">font dots</label>
-          <input id="text-size" type="number" min="1" max="500" step="1" value="80" class="compact-input">
         </div>
         <div class="row pair">
           <label data-i18n="field.x">x</label>
@@ -734,39 +859,49 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       </div>
 
       <div id="props-transform" hidden style="margin-top:.75rem; padding-top:.75rem; border-top:1px solid var(--line);">
-        <div class="row">
-          <label data-i18n="field.size" title="visible bounding box in printer dots (180 dpi) - width × height">size dots</label>
-          <input id="el-w" type="number" min="1" step="1" class="compact-input" title="visible width (dots, 180 dpi)">
-          <button id="aspect-lock" class="secondary" type="button" aria-pressed="true" aria-label="lock aspect ratio" title="lock aspect ratio: when on, w and h scale together; when off, mid-edge handles stretch one axis">🔒</button>
-          <input id="el-h" type="number" min="1" step="1" class="compact-input" title="visible height (dots, 180 dpi)">
+        <div class="row props-control-row">
+          <div class="props-control-group">
+            <label data-i18n="field.size" title="visible bounding box in printer dots - width × height">size dots</label>
+            <div class="props-control-fields">
+              <input id="el-w" type="number" min="1" step="1" class="mini-prop-input" title="visible width in dots">
+              <button id="aspect-lock" class="secondary aspect-lock" type="button" aria-pressed="true" aria-label="lock aspect ratio" title="lock aspect ratio: when on, w and h scale together; when off, mid-edge handles stretch one axis">🔒</button>
+              <input id="el-h" type="number" min="1" step="1" class="mini-prop-input" title="visible height in dots">
+            </div>
+          </div>
+          <span class="props-control-divider" aria-hidden="true"></span>
+          <div class="props-control-group">
+            <label data-i18n="field.rotation">rotation</label>
+            <div class="props-control-fields">
+              <input id="el-rotation" type="number" step="1" class="mini-prop-input" aria-label="rotation in degrees">
+              <span class="muted">°</span>
+              <button id="rot-cw" class="secondary quick-rotate" type="button" aria-label="rotate 90 degrees clockwise" title="rotate 90 degrees clockwise">+90</button>
+              <button id="rot-ccw" class="secondary quick-rotate" type="button" aria-label="rotate 90 degrees counter-clockwise" title="rotate 90 degrees counter-clockwise">-90</button>
+            </div>
+          </div>
         </div>
-        <div class="row">
-          <label data-i18n="field.rotation">rotation</label>
-          <input id="el-rotation" type="number" step="1" class="compact-input">
-          <span class="muted">°</span>
-          <button id="rot-cw"  class="secondary" type="button" aria-label="rotate 90 degrees clockwise">+90°</button>
-          <button id="rot-ccw" class="secondary" type="button" aria-label="rotate 90 degrees counter-clockwise">-90°</button>
-        </div>
-        <div class="row">
-          <label data-i18n="field.flip">flip</label>
-          <button id="flip-h" class="secondary" type="button" aria-pressed="false" aria-label="flip horizontal" title="mirror left-right" data-i18n="field.flip.h">↔ horizontal</button>
-          <button id="flip-v" class="secondary" type="button" aria-pressed="false" aria-label="flip vertical"   title="mirror top-bottom" data-i18n="field.flip.v">↕ vertical</button>
-        </div>
-        <div class="row">
-          <label data-i18n="field.blend">blend</label>
-          <select id="el-composite">
-            <option value="or"  data-i18n="field.blend.or">OR (stack, default)</option>
-            <option value="and" data-i18n="field.blend.and">AND (intersect)</option>
-            <option value="xor" data-i18n="field.blend.xor">XOR (cancel)</option>
-            <option value="not" data-i18n="field.blend.not">NOT (subtract)</option>
-          </select>
-          <span class="muted" data-i18n="field.blend.hint">how this element overlays the layers below it</span>
+        <div class="row props-control-row">
+          <div class="props-control-group">
+            <label data-i18n="field.flip">flip</label>
+            <div class="props-control-fields">
+              <button id="flip-h" class="secondary flip-button" type="button" aria-pressed="false" aria-label="flip horizontal" title="mirror left-right">↔</button>
+              <button id="flip-v" class="secondary flip-button" type="button" aria-pressed="false" aria-label="flip vertical" title="mirror top-bottom">↕</button>
+            </div>
+          </div>
+          <span class="props-control-divider" aria-hidden="true"></span>
+          <div class="props-control-group blend-group">
+            <label data-i18n="field.blend">blend</label>
+            <select id="el-composite">
+              <option value="or"  data-i18n="field.blend.or">OR (stack, default)</option>
+              <option value="and" data-i18n="field.blend.and">AND (intersect)</option>
+              <option value="xor" data-i18n="field.blend.xor">XOR (cancel)</option>
+              <option value="not" data-i18n="field.blend.not">NOT (subtract)</option>
+            </select>
+            <span class="muted" style="font-size:.72rem; line-height:1.25;" data-i18n="field.blend.hint">how this element overlays the layers below it</span>
+          </div>
         </div>
       </div>
     </div>
-   </div><!-- /col-left -->
 
-   <div class="col-right">
     <div class="panel" id="layers-panel" hidden>
       <h2><span data-i18n="panel.layers">Layers</span> <span class="muted" style="text-transform:none; font-weight:normal; letter-spacing:0;" data-i18n="panel.layers.hint">- top of canvas first; drag to reorder</span></h2>
       <ul id="el-list" style="list-style:none; padding:0; margin:0;"></ul>
@@ -774,6 +909,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
 
     <details class="panel" id="tpl-panel">
       <summary style="cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em;" data-i18n="panel.tpl">Template &amp; CSV data</summary>
+      <p class="muted" style="font-size:.8rem; margin:.55rem 0;" data-i18n="tpl.saved-with-label">Template and CSV rows are saved with the selected label. Use Update to store changes.</p>
       <details class="tpl-help">
         <summary class="muted">CSV data with field names in first row.
           <span class="tpl-help-toggle when-closed">Use variables…</span>
@@ -816,8 +952,45 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       </div>
     </details>
 
-    <details class="panel" id="shipping-import-panel">
-      <summary style="cursor:pointer; color:var(--muted); font-size:.85rem; font-weight:600; text-transform:uppercase; letter-spacing:.05em;" data-i18n="shipping.panel.title">Shipping label</summary>
+
+   </div><!-- /col-right -->
+   </div><!-- /label-mode-custom -->
+
+   <section class="label-mode-pane" id="label-mode-address" role="tabpanel" aria-labelledby="label-mode-tab-address" hidden>
+    <div class="address-layout">
+     <div class="panel address-preview-panel">
+      <h2 data-i18n="address.preview.title">Preview</h2>
+      <div class="address-preview-frame">
+       <canvas id="address-preview" width="720" height="150" aria-label="Address label preview"></canvas>
+      </div>
+      <div class="address-preview-meta">
+       <span id="address-label-size" class="muted" data-i18n="address.preview.empty">Your address label preview will appear here.</span>
+       <span class="muted" data-i18n="address.preview.media">DK-22205 · 62 mm tape</span>
+      </div>
+     </div>
+     <div class="panel address-input-panel">
+      <h2 data-i18n="address.title">Address label</h2>
+      <p class="muted" data-i18n="address.help">Enter up to five lines. Empty lines are ignored; the longest line is fitted to the printable tape width and the cut length grows with the number of lines.</p>
+      <div class="address-fields">
+       <div class="address-field"><label for="address-line-1" data-i18n="address.line1">Line 1</label><input id="address-line-1" type="text" autocomplete="name" maxlength="100" data-i18n-attr="placeholder:address.placeholder1" placeholder="Name or company"></div>
+       <div class="address-field"><label for="address-line-2" data-i18n="address.line2">Line 2</label><input id="address-line-2" type="text" autocomplete="street-address" maxlength="100" data-i18n-attr="placeholder:address.placeholder2" placeholder="Street and house number"></div>
+       <div class="address-field"><label for="address-line-3" data-i18n="address.line3">Line 3</label><input id="address-line-3" type="text" autocomplete="postal-code" maxlength="100" data-i18n-attr="placeholder:address.placeholder3" placeholder="Postcode and city"></div>
+       <div class="address-field"><label for="address-line-4" data-i18n="address.line4">Line 4</label><input id="address-line-4" type="text" maxlength="100" data-i18n-attr="placeholder:address.placeholder4" placeholder="Additional line (optional)"></div>
+       <div class="address-field"><label for="address-line-5" data-i18n="address.line5">Line 5</label><input id="address-line-5" type="text" maxlength="100" data-i18n-attr="placeholder:address.placeholder5" placeholder="Additional line (optional)"></div>
+      </div>
+      <div class="row address-print-row">
+       <button id="address-print" type="button" disabled data-i18n="address.print">Print address label</button>
+       <button id="address-clear" class="secondary" type="button" data-i18n="address.clear">Clear</button>
+       <span id="address-print-status" class="muted" aria-live="polite" data-i18n="address.status.empty">Enter at least one line.</span>
+      </div>
+     </div>
+    </div>
+   </section>
+
+   <section class="label-mode-pane" id="label-mode-shipping" role="tabpanel" aria-labelledby="label-mode-tab-shipping" hidden>
+    <div class="shipping-pane">
+    <div class="panel" id="shipping-import-panel">
+      <h2 data-i18n="shipping.panel.title">Shipping label</h2>
       <div class="shipping-import-content">
         <div class="row">
           <button id="shipping-label-import" class="secondary" type="button"
@@ -891,8 +1064,9 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
           </div>
         </div>
       </div>
-    </details>
-   </div><!-- /col-right -->
+    </div>
+    </div>
+   </section>
   </section>
 
 
@@ -930,7 +1104,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
   <section id="view-settings" hidden>
     <div class="panel">
       <h2 data-i18n="panel.wifi">Wi-Fi networks</h2>
-      <p class="muted" data-i18n="panel.wifi.help">LabelSis tries each saved network in order on boot, last-used first. AP-mode onboarding only kicks in when every entry fails. Add the networks for each place this device travels to (home, office, workshop) and the device picks the first that's reachable.</p>
+      <p class="muted" data-i18n="panel.wifi.help">LabelPrinter tries each saved network in order on boot, last-used first. AP-mode onboarding only kicks in when every entry fails. Add the networks for each place this device travels to (home, office, workshop) and the device picks the first that's reachable.</p>
       <ul id="wifi-aps" class="wifi-aps"></ul>
       <div class="row wifi-prescan-row">
         <label for="wifi-prescan" style="flex:1">
@@ -967,7 +1141,7 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
       <p class="muted" data-i18n="panel.api-host.help">When the SPA is loaded outside the device (localhost dev server), set this to the device URL and the page will hit it cross-origin. The embedded build defaults to same-origin and ignores this.</p>
       <div class="row">
         <label data-i18n="field.api-host">API host</label>
-        <input id="api-host" type="text" placeholder="(empty = same origin, e.g. http://labelsis.local)">
+        <input id="api-host" type="text" placeholder="(empty = same origin, e.g. http://labelprinter.local)">
       </div>
       <div class="row">
         <span class="spacer"></span>
@@ -975,6 +1149,16 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <button id="api-host-clear" class="secondary" data-i18n="btn.clear">clear</button>
       </div>
       <div id="settings-log" class="muted" style="margin-top:.5rem;"></div>
+    </div>
+
+    <div class="panel">
+      <h2 data-i18n="panel.local-fonts">Local fonts</h2>
+      <p class="muted" data-i18n="panel.local-fonts.help">Allow the browser to list fonts installed on this computer. Font files stay on this computer; only the selected font family is stored with a label.</p>
+      <div class="row">
+        <button id="font-discover-local" class="secondary" type="button"
+                title="Ask permission to list fonts installed on this computer">Load installed fonts</button>
+        <span id="font-discover-status" class="muted" aria-live="polite"></span>
+      </div>
     </div>
 
     <div class="panel">
@@ -1017,11 +1201,43 @@ const STRINGS = {
     "tab.status":              "Status",
     "tab.label":               "Label",
     "tab.settings":            "Settings",
+    "label.mode.custom":       "Custom label",
+    "label.mode.address":      "Address label",
+    "label.mode.shipping":     "Shipping label",
+    "address.title":           "Address label",
+    "address.help":            "Enter up to five lines. Empty lines are ignored; the longest line is fitted to the printable tape width and the cut length grows with the number of lines.",
+    "address.line1":            "Line 1",
+    "address.line2":            "Line 2",
+    "address.line3":            "Line 3",
+    "address.line4":            "Line 4",
+    "address.line5":            "Line 5",
+    "address.placeholder1":   "Name or company",
+    "address.placeholder2":   "Street and house number",
+    "address.placeholder3":   "Postcode and city",
+    "address.placeholder4":   "Additional line (optional)",
+    "address.placeholder5":   "Additional line (optional)",
+    "address.print":           "Print address label",
+    "address.clear":           "Clear",
+    "address.status.empty":   "Enter at least one line.",
+    "address.status.offline": "Connect a ready QL-700 with DK-22205 62 mm continuous tape.",
+    "address.status.ready":   "Ready to print.",
+    "address.status.sending": "Sending address label to the QL-700...",
+    "address.status.done":    "Address label sent to the printer.",
+    "address.status.error":   "Could not print address label: {error}",
+    "address.status.tooLong": "A line is too long to fit the printable tape width, even at the smallest supported text size.",
+    "address.preview.title":  "Preview",
+    "address.preview.empty":  "Your address label preview will appear here.",
+    "address.preview.media":  "DK-22205 · 62 mm tape",
+    "address.preview.size":   "{lines} lines · 62 × {length} mm label",
     "panel.label":             "Label",
+    "panel.font-settings":     "Font settings",
+    "panel.local-fonts":       "Local fonts",
+    "panel.local-fonts.help":  "Allow the browser to list fonts installed on this computer. Font files stay on this computer; only the selected font family is stored with a label.",
+    "tpl.saved-with-label":    "Template and CSV rows are saved with the selected label. Use Update to store changes.",
     "panel.status":            "Status",
     "panel.about":             "About",
     "panel.ota":               "Firmware update",
-    "ota.help":                "OTA gate is open (printer in Editor Lite mode, or BOOT button toggled). Pick a LabelSis firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.",
+    "ota.help":                "OTA gate is open (printer in Editor Lite mode, or BOOT button toggled). Pick a LabelPrinter firmware image (.bin) and upload to install. The device reboots into the new image; if it cannot start it, the bootloader rolls back automatically.",
     "btn.ota.upload":          "install",
     "lib.btn.export":          "export",
     "lib.btn.export.title":     "export this design as a JSON file",
@@ -1074,9 +1290,9 @@ const STRINGS = {
     "about.intro":             "- network print server for the Brother QL-700, running on an ESP32-S3 with a self-hosted web UI.",
     "about.firmware":          "Firmware",
     "about.licenses":          "Third-party components used by this firmware:",
-    "about.icon.tooltip":      "LabelSis -- open the project page on GitHub",
+    "about.icon.tooltip":      "LabelPrinter -- open the project page on GitHub",
     "panel.wifi":              "Wi-Fi networks",
-    "panel.wifi.help":         "LabelSis tries each saved network in order on boot, last-used first. AP-mode onboarding only kicks in when every entry fails. Add the networks for each place this device travels to (home, office, workshop) and the device picks the first that's reachable.",
+    "panel.wifi.help":         "LabelPrinter tries each saved network in order on boot, last-used first. AP-mode onboarding only kicks in when every entry fails. Add the networks for each place this device travels to (home, office, workshop) and the device picks the first that's reachable.",
     "panel.wifi.prescan.help": "Cuts boot time when configured networks aren't reachable. Off by default because hidden SSIDs (no probe response) wouldn't show up and would be skipped.",
     "panel.wifi.add":          "Add a network:",
     "panel.api-host":          "API host",
@@ -1160,10 +1376,10 @@ const STRINGS = {
     "field.text":              "text",
     "field.font":              "font",
     "field.style":             "style",
-    "field.font-px":           "font dots",
+    "field.font-px":           "font size",
     "field.x":                 "x",
     "field.y":                 "y",
-    "field.size":              "size dots",
+    "field.size":              "size",
     "field.rotation":          "rotation",
     "field.flip":              "flip",
     "field.flip.h":            "↔ horizontal",
@@ -1211,7 +1427,7 @@ const STRINGS = {
 };
 
 /* One-shot migration of localStorage keys after the project rename
- * pt700 -> LabelSis. Walks every key prefixed "pt700:" and copies it
+ * pt700 -> LabelPrinter. Walks every key prefixed "pt700:" and copies it
  * to the same name under "labelsis:", then drops the old. Runs at
  * module-init time so all the const definitions below see the new
  * keys on first load post-upgrade. After v0.2.x there will be no
@@ -1316,6 +1532,9 @@ async function setLanguage(lang) {
   }
   document.documentElement.lang = lang;
   applyI18n();
+  /* Refresh the address preview after dynamic strings are translated;
+   * its size and print status are generated from the current input data. */
+  if (typeof updateAddressLabelPreview === "function") updateAddressLabelPreview(false);
   /* The bits not driven by data-i18n (props panel labels, log
    * messages already on screen) need a manual refresh: */
   if (typeof syncPropsPanel === "function") syncPropsPanel();
@@ -1323,9 +1542,13 @@ async function setLanguage(lang) {
 
 /* When the SPA runs outside the device (file://, localhost, etc.),
  * apiHost prefixes every /api/... request so the page can hit a real
- * LabelSis over the LAN. Empty = same-origin, which is the embedded
+ * LabelPrinter over the LAN. Empty = same-origin, which is the embedded
  * default. Persisted to localStorage from the Settings tab. */
-let apiHost = (localStorage.getItem("labelsis:apiHost") || "").replace(/\/+$/, "");
+const savedApiHost = localStorage.getItem("labelsis:apiHost") || "";
+let apiHost = savedApiHost
+  .replace(/^(https?:\/\/)labelsis\.local(?=[:/]|$)/i, "$1labelprinter.local")
+  .replace(/\/+$/, "");
+if (apiHost !== savedApiHost) localStorage.setItem("labelsis:apiHost", apiHost);
 function apiURL(path) { return apiHost + path; }
 
 // Fixed geometry for the supported DK-22205 62 mm continuous roll.
@@ -1560,6 +1783,15 @@ canvasOpts.labelWidthMm = clampLabelLengthMm(canvasOpts.labelWidthMm);
 function saveCanvasOpts() {
   try { localStorage.setItem(CANVAS_OPTS_KEY, JSON.stringify(canvasOpts)); }
   catch {}
+}
+function syncCanvasOptsUI() {
+  const $mode = document.getElementById("opt-len-mode");
+  const $mm = document.getElementById("opt-len-mm");
+  if (!$mode || !$mm) return;
+  canvasOpts.labelWidthMm = clampLabelLengthMm(canvasOpts.labelWidthMm);
+  $mode.value = canvasOpts.labelWidthMode;
+  $mm.value = canvasOpts.labelWidthMm;
+  $mm.disabled = canvasOpts.labelWidthMode !== "fixed";
 }
 let elements  = [];
 let selectedId = null;
@@ -2982,6 +3214,170 @@ async function doPrint() {
   }
 }
 
+
+/* Address-label workflow. The user-facing preview is in physical label
+ * orientation: 62 mm tape width by an automatically calculated feed length.
+ * Each input is one printed line. Empty inputs are ignored. The longest line
+ * is fitted to the 696-dot printable band; the number of lines determines
+ * the cut length. For the QL-700 raster, transpose the physical preview into
+ * feed rows x 720 head dots and reverse the head axis exactly once. */
+const ADDRESS_STORAGE_KEY = "labelsis:addressLines";
+const ADDRESS_MAX_LINES = 5;
+const ADDRESS_BASE_FONT_PX = 40;
+const ADDRESS_MIN_FONT_PX = 16;
+const ADDRESS_LINE_ADVANCE_PX = 46;
+const ADDRESS_END_MARGIN_PX = 10;
+const ADDRESS_SIDE_MARGIN_PX = 24;
+
+function addressLineInputs() {
+  return Array.from({ length: ADDRESS_MAX_LINES }, (_, i) =>
+    document.getElementById(`address-line-${i + 1}`));
+}
+
+function updateAddressLabelPreview(persist = true) {
+  const inputs = addressLineInputs();
+  const lines = inputs.map(input => input.value.trim()).filter(Boolean);
+  if (persist) {
+    try { localStorage.setItem(ADDRESS_STORAGE_KEY, JSON.stringify(inputs.map(input => input.value))); }
+    catch (_) {}
+  }
+
+  const canvas = document.getElementById("address-preview");
+  const context = canvas.getContext("2d", { alpha: false });
+  canvas.width = QL700_TAPE.dots;
+  canvas.height = QL700_MIN_FEED_ROWS;
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  let fontSize = ADDRESS_BASE_FONT_PX;
+  let rows = QL700_MIN_FEED_ROWS;
+  let tooLong = false;
+  let maxLineWidth = 0;
+  if (lines.length) {
+    const printableWidth = QL700_TAPE.print - ADDRESS_SIDE_MARGIN_PX * 2;
+    context.font = `${fontSize}px Arial, Helvetica, sans-serif`;
+    maxLineWidth = Math.max(...lines.map(line => context.measureText(line).width));
+    if (maxLineWidth > printableWidth) {
+      fontSize = Math.floor(ADDRESS_BASE_FONT_PX * printableWidth / maxLineWidth);
+      if (fontSize < ADDRESS_MIN_FONT_PX) {
+        tooLong = true;
+        fontSize = ADDRESS_MIN_FONT_PX;
+      }
+    }
+
+    const lineAdvance = Math.max(fontSize + 3, Math.round(ADDRESS_LINE_ADVANCE_PX * fontSize / ADDRESS_BASE_FONT_PX));
+    const blockHeight = fontSize + (lines.length - 1) * lineAdvance;
+    rows = Math.max(QL700_MIN_FEED_ROWS, Math.ceil(blockHeight + ADDRESS_END_MARGIN_PX * 2));
+    rows = Math.min(QL700_MAX_FEED_ROWS, rows);
+    canvas.height = rows;
+
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.font = `${fontSize}px Arial, Helvetica, sans-serif`;
+    context.fillStyle = "#000";
+    context.textAlign = "left";
+    context.textBaseline = "middle";
+    const measured = Math.max(...lines.map(line => context.measureText(line).width));
+    const x = QL700_TAPE.margin + Math.max(ADDRESS_SIDE_MARGIN_PX,
+      Math.floor((QL700_TAPE.print - measured) / 2));
+    const firstY = (rows - blockHeight) / 2 + fontSize / 2;
+    lines.forEach((line, index) => context.fillText(line, x, firstY + index * lineAdvance));
+  }
+
+  const lengthMm = (rows * 25.4 / currentDpi()).toFixed(1);
+  addressLabelState = { lines, rows, valid: lines.length > 0 && !tooLong, tooLong, fontSize };
+  const size = document.getElementById("address-label-size");
+  size.textContent = lines.length
+    ? t("address.preview.size", { lines: lines.length, length: lengthMm })
+    : t("address.preview.empty");
+  document.getElementById("address-print-status").textContent = tooLong
+    ? t("address.status.tooLong")
+    : (!lines.length ? t("address.status.empty") : t("address.status.ready"));
+  refreshPrintButtons();
+}
+
+function makeAddressPrintRaster(previewCanvas) {
+  const raster = document.createElement("canvas");
+  raster.width = previewCanvas.height;
+  raster.height = QL700_TAPE.dots;
+  const context = raster.getContext("2d", { alpha: false });
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, raster.width, raster.height);
+  context.setTransform(0, -1, 1, 0, 0, QL700_TAPE.dots);
+  context.drawImage(previewCanvas, 0, 0);
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  return raster;
+}
+
+async function printAddressLabel() {
+  if (!addressLabelState.valid) return;
+  const printerReady = printer && printer.ok && printer.transport === "usb_host" &&
+    printer.printer === "QL-700" && printer.ready && printer.print_supported &&
+    printer.media_width_mm === 62 && printer.media_type === QL700_CONTINUOUS_MEDIA_TYPE &&
+    printer.media_length_mm === 0;
+  if (!printerReady) {
+    document.getElementById("address-print-status").textContent = t("address.status.offline");
+    refreshPrintButtons();
+    return;
+  }
+
+  printingInProgress = true;
+  refreshPrintButtons();
+  const status = document.getElementById("address-print-status");
+  status.textContent = t("address.status.sending");
+  log(t("address.status.sending"));
+  try {
+    const raster = makeAddressPrintRaster(document.getElementById("address-preview"));
+    const body = packRaster(raster);
+    const response = await fetch(apiURL("/api/ql700/print"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-QL700-Confirm": "print-62mm"
+      },
+      body
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    status.textContent = t("address.status.done");
+    log(result.printer_complete_verified === false
+      ? `${t("address.status.done")} (${result.rows} rows sent; physical completion is not verified)`
+      : t("address.status.done"), true);
+  } catch (err) {
+    status.textContent = t("address.status.error", { error: err.message });
+    log(t("address.status.error", { error: err.message }), false);
+  } finally {
+    printingInProgress = false;
+    refreshPrintButtons();
+    refreshStatus();
+  }
+}
+
+function initAddressLabelUI() {
+  const inputs = addressLineInputs();
+  try {
+    const saved = JSON.parse(localStorage.getItem(ADDRESS_STORAGE_KEY) || "null");
+    if (Array.isArray(saved)) inputs.forEach((input, index) => {
+      if (typeof saved[index] === "string") input.value = saved[index];
+    });
+  } catch (_) {}
+  inputs.forEach((input, index) => {
+    input.addEventListener("input", () => updateAddressLabelPreview());
+    input.addEventListener("keydown", event => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      inputs[index + 1]?.focus();
+    });
+  });
+  document.getElementById("address-clear").addEventListener("click", () => {
+    inputs.forEach(input => { input.value = ""; });
+    updateAddressLabelPreview();
+    inputs[0].focus();
+  });
+  document.getElementById("address-print").addEventListener("click", printAddressLabel);
+  updateAddressLabelPreview(false);
+}
+
 function log(msg, ok) {
   const el = document.getElementById("log");
   el.textContent = msg;
@@ -3571,6 +3967,7 @@ function refreshUndoButtons() {
  * tracks reality without thrashing the DOM on every redraw. */
 let printingInProgress = false;
 let shippingPdfExportInProgress = false;
+let addressLabelState = { lines: [], rows: QL700_MIN_FEED_ROWS, valid: false, tooLong: false };
 let _lastPrintErr      = null;
 function refreshPrintButtons() {
   const err = elements.some(e => e._barcodeError || e._qrError);
@@ -3609,6 +4006,16 @@ function refreshPrintButtons() {
         (hasShippingCrop ? t("shipping.print.ready") : t("shipping.print.select"));
     }
   }
+  const addressPrint = document.getElementById("address-print");
+  if (addressPrint) {
+    addressPrint.disabled = !addressLabelState.valid || noPrint || badQlMedia || printingInProgress;
+    const addressStatus = document.getElementById("address-print-status");
+    if (addressStatus && !printingInProgress) {
+      addressStatus.textContent = addressLabelState.tooLong ? t("address.status.tooLong") :
+        (!addressLabelState.lines.length ? t("address.status.empty") :
+          (noPrint || badQlMedia ? t("address.status.offline") : t("address.status.ready")));
+    }
+  }
   if (_lastPrintErr !== null && _lastPrintErr !== err) renderLayerList();
   _lastPrintErr = err;
 }
@@ -3640,6 +4047,7 @@ function saveSession() {
         csvCurrentRow,
         csvShowHeader,
         view:        document.querySelector("nav a.active")?.dataset.view || "print",
+        labelMode:   localStorage.getItem("labelsis:labelMode") || "custom",
       };
       localStorage.setItem(SESSION_KEY, JSON.stringify(data));
     } catch (e) { /* quota / serialization errors -- silent */ }
@@ -3667,6 +4075,7 @@ function loadSession() {
     if (typeof data.csvShowHeader === "boolean") csvShowHeader = data.csvShowHeader;
 
     if (typeof data.view === "string") showView(data.view);
+    if (typeof data.labelMode === "string") setLabelMode(data.labelMode, false);
     syncPropsPanel();
     renderLayerList();
     csvRender();
@@ -3720,11 +4129,55 @@ function libSaveAs(name) {
   lib[name] = {
     saved: new Date().toISOString(),
     elements: elements.map(stripCached),
+    canvas: {
+      labelWidthMode: canvasOpts.labelWidthMode,
+      labelWidthMm: canvasOpts.labelWidthMm,
+    },
+    template: {
+      csvText: csvText(),
+      currentRow: csvCurrentRow,
+      showHeader: csvShowHeader,
+    },
   };
   if (libWrite(lib)) {
     currentLabelName = name;
     libRefresh();
+    saveSession();
     log(`saved "${name}"`, true);
+  }
+}
+
+/* Restore the settings that belong to a named label or an exported design.
+ * Old library entries have no canvas/template fields; when loading one as a
+ * named label, use clean defaults rather than leaking the previous label's
+ * fixed length or CSV rows into it. */
+function applySavedLabelSettings(saved, clearMissing = false) {
+  const canvas = saved && saved.canvas && typeof saved.canvas === "object" ? saved.canvas : null;
+  if (canvas) {
+    if (canvas.labelWidthMode === "auto" || canvas.labelWidthMode === "fixed")
+      canvasOpts.labelWidthMode = canvas.labelWidthMode;
+    if (Number.isFinite(Number(canvas.labelWidthMm)))
+      canvasOpts.labelWidthMm = clampLabelLengthMm(canvas.labelWidthMm);
+  } else if (clearMissing) {
+    canvasOpts.labelWidthMode = CANVAS_OPTS_DEFAULT.labelWidthMode;
+    canvasOpts.labelWidthMm = CANVAS_OPTS_DEFAULT.labelWidthMm;
+  }
+  if (canvas || clearMissing) {
+    saveCanvasOpts();
+    syncCanvasOptsUI();
+  }
+
+  const template = saved && saved.template && typeof saved.template === "object" ? saved.template : null;
+  if (template && typeof template.csvText === "string") {
+    csvSetText(template.csvText);
+    csvCurrentRow = Number.isInteger(template.currentRow) ? Math.max(0, template.currentRow) : 0;
+    csvShowHeader = !!template.showHeader;
+    csvUpdate();
+  } else if (clearMissing) {
+    csvSetText("");
+    csvCurrentRow = 0;
+    csvShowHeader = false;
+    csvUpdate();
   }
 }
 
@@ -3734,6 +4187,7 @@ function libLoad(name) {
   pushUndo();
   restoreFromJSON(JSON.stringify(lib[name].elements));
   currentLabelName = name;
+  applySavedLabelSettings(lib[name], true);
   libRefresh();
   log(`loaded "${name}"`, true);
 }
@@ -3754,10 +4208,12 @@ function libClear() {
   elements = [];
   currentLabelName = "";
   selectedId = null;
+  applySavedLabelSettings({}, true);
   syncPropsPanel();
   renderLayerList();
   libRefresh();
   redraw();
+  saveSession();
 }
 
 /* design files: one design = one file
@@ -3793,6 +4249,11 @@ function designDoc() {
     canvas: {
       labelWidthMode: canvasOpts.labelWidthMode,
       labelWidthMm:   canvasOpts.labelWidthMm,
+    },
+    template: {
+      csvText: csvText(),
+      currentRow: csvCurrentRow,
+      showHeader: csvShowHeader,
     },
     elements: elements.map(stripCached),
   };
@@ -3849,18 +4310,19 @@ function scaleElementForDpi(el, ratio) {
 /* Apply a parsed design file. Returns an error string, or null. */
 function applyDesignDoc(doc, filename) {
   /* Bare array = a library entry or an old session snapshot. */
-  let list, dpi = DESIGN_LEGACY_DPI, docName = "", canvas = null;
+  let list, dpi = DESIGN_LEGACY_DPI, docName = "", canvas = null, template = null;
   if (Array.isArray(doc)) {
     list = doc;
   } else if (doc && typeof doc === "object" && Array.isArray(doc.elements)) {
     if (doc.format && doc.format !== DESIGN_FORMAT)
-      return "not a LabelSis design file";
+      return "not a LabelPrinter design file";
     if (doc.version && doc.version > DESIGN_VERSION)
       return `file is from a newer version (v${doc.version}) - update the firmware`;
     list = doc.elements;
     if (isFinite(doc.dpi) && doc.dpi > 0) dpi = doc.dpi;
     docName    = typeof doc.name === "string" ? doc.name.trim() : "";
     canvas     = doc.canvas && typeof doc.canvas === "object" ? doc.canvas : null;
+    template   = doc.template && typeof doc.template === "object" ? doc.template : null;
   } else {
     return "no label elements in this file";
   }
@@ -3875,18 +4337,8 @@ function applyDesignDoc(doc, filename) {
   pushUndo();
   restoreFromJSON(JSON.stringify(scaled));
 
-  if (canvas) {
-    if (canvas.labelWidthMode === "auto" || canvas.labelWidthMode === "fixed")
-      canvasOpts.labelWidthMode = canvas.labelWidthMode;
-    if (isFinite(canvas.labelWidthMm))
-      canvasOpts.labelWidthMm = clampLabelLengthMm(canvas.labelWidthMm);
-    saveCanvasOpts();
-    const $mode = document.getElementById("opt-len-mode");
-    const $mm   = document.getElementById("opt-len-mm");
-    if ($mode) $mode.value = canvasOpts.labelWidthMode;
-    if ($mm)   { $mm.value = canvasOpts.labelWidthMm; $mm.disabled = canvasOpts.labelWidthMode !== "fixed"; }
-  }
   currentLabelName = docName;
+  applySavedLabelSettings({ canvas, template }, false);
   syncPropsPanel();
   renderLayerList();
   libRefresh();
@@ -5478,7 +5930,7 @@ function labelSisCheckFontsForPrint() {
   }
 }
 
-/* LabelSis font UI v0.7.1: remove "Bundled:" in displayed labels only.
+/* LabelPrinter font UI v0.7.1: remove "Bundled:" in displayed labels only.
  * Keep the internal family name for saved-design compatibility. */
 function labelSisFontDisplayName(family) {
   return typeof family === "string" && family.startsWith("Bundled: ")
@@ -5557,7 +6009,7 @@ function labelSisFontDisplayName(family) {
         : "Browser returned no installed fonts";
       redraw();
     } catch (err) {
-      console.error("LabelSis local font access:", err);
+      console.error("LabelPrinter local font access:", err);
       if (err && err.name === "NotAllowedError") {
         $localStatus.textContent = "Font permission denied — check browser site settings";
       } else if (err && err.name === "SecurityError") {
@@ -5699,7 +6151,7 @@ document.getElementById("add-qr").addEventListener("click", () => {
     id: nextId++, type: "qr",
     x: rightmostX(), y: 0, rotation: 0, composite: "or",
     scaleX: 1, scaleY: 1, aspectLocked: true,
-    text: "https://labelsis.local/",
+    text: "https://labelprinter.local/",
     ecc: "M",
     size: 3,
   };
@@ -6344,6 +6796,7 @@ document.getElementById("props-panel").addEventListener("focusout", () => {
 });
 document.getElementById("print").addEventListener("click", doPrint);
 document.getElementById("print-all").addEventListener("click", doPrintAll);
+initAddressLabelUI();
 /* The contenteditable IS the rows list -- typing updates the parsed
  * model (csvData) and re-paints .header / .active classes. Click to
  * position the caret in a row also activates it (drives the canvas
@@ -6433,7 +6886,7 @@ document.getElementById("csv-export").addEventListener("click", () => {
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
-  a.download = `labelsis-labels-${stamp}.csv`;
+  a.download = `labelprinter-labels-${stamp}.csv`;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 0);
@@ -6454,10 +6907,7 @@ document.getElementById("csv-clear").addEventListener("click", () => {
   const $origin = document.getElementById("opt-origin");
 
   function syncToUI() {
-    canvasOpts.labelWidthMm = clampLabelLengthMm(canvasOpts.labelWidthMm);
-    $mode.value     = canvasOpts.labelWidthMode;
-    $mm.value       = canvasOpts.labelWidthMm;
-    $mm.disabled    = canvasOpts.labelWidthMode !== "fixed";
+    syncCanvasOptsUI();
     $rulers.checked = !!canvasOpts.showRulers;
     $grid.checked   = !!canvasOpts.showGrid;
     $center.checked = !!canvasOpts.showCenter;
@@ -6537,6 +6987,24 @@ document.getElementById("api-host-clear").addEventListener("click", () => {
  * status, so the title-bar h1 toggle can flip back to it. */
 let lastNonStatusView = "print";
 
+function setLabelMode(mode, persist = true) {
+  const allowed = ["custom", "address", "shipping"];
+  if (!allowed.includes(mode)) mode = "custom";
+  document.querySelectorAll("[data-label-mode]").forEach(tab => {
+    const active = tab.dataset.labelMode === mode;
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+    tab.tabIndex = active ? 0 : -1;
+  });
+  document.querySelectorAll(".label-mode-pane").forEach(pane => {
+    pane.hidden = pane.id !== `label-mode-${mode}`;
+  });
+  if (persist) {
+    try { localStorage.setItem("labelsis:labelMode", mode); } catch (_) {}
+    saveSession();
+  }
+  return mode;
+}
+
 function showView(name) {
   if (name !== "status") lastNonStatusView = name;
   document.querySelectorAll("section[id^=view-]").forEach(s => {
@@ -6561,6 +7029,21 @@ function showView(name) {
 document.querySelectorAll("nav a").forEach(a => {
   a.addEventListener("click", e => { e.preventDefault(); showView(a.dataset.view); });
 });
+document.querySelectorAll("[data-label-mode]").forEach(tab => {
+  tab.addEventListener("click", () => setLabelMode(tab.dataset.labelMode));
+  tab.addEventListener("keydown", event => {
+    const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const tabs = Array.from(document.querySelectorAll("[data-label-mode]"));
+    const current = tabs.indexOf(tab);
+    const next = event.key === "Home" ? 0 :
+      event.key === "End" ? tabs.length - 1 :
+        (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    setLabelMode(tabs[next].dataset.labelMode);
+    tabs[next].focus();
+  });
+});
 document.getElementById("burger").addEventListener("click", () => {
   const nav = document.getElementById("nav");
   const open = nav.classList.toggle("open");
@@ -6577,9 +7060,9 @@ document.getElementById("title").addEventListener("click", () => {
 });
 
 /* Phone-only "..." toggle that reveals the secondary toolbar
- * actions (duplicate/delete/undo/redo) and the label library row.
- * No-op on desktop where the CSS .phone-only rule keeps the button
- * hidden and the rows always visible. */
+ * actions (duplicate/delete/undo/redo). Saved-label actions remain
+ * visible in their own wrapping row at every screen width. No-op on
+ * desktop where the CSS .phone-only rule keeps this button hidden. */
 document.getElementById("phone-more").addEventListener("click", () => {
   const body = document.body;
   const open = body.classList.toggle("show-more");
@@ -7012,6 +7495,7 @@ if (!loadSession()) {
   selectElement(elements[0].id);
 }
 libRefresh();
+setLabelMode(localStorage.getItem("labelsis:labelMode") || "custom", false);
 refreshUndoButtons();
 
 refreshStatus();
