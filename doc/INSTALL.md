@@ -5,7 +5,7 @@ Flash the ESP32-S3FH4R2 Super Mini from VSCode using PlatformIO. See [HARDWARE.m
 ## First flash
 
 1. Open this repository in VSCode with the PlatformIO extension installed.
-2. (Optional) Copy `main/wifi_credentials.example.h` to `main/wifi_credentials.h` and set `WIFI_SSID` and `WIFI_PASSWORD`. Without this file, the device starts the `labelsis-setup` captive portal.
+2. (Optional) Copy `main/wifi_credentials.example.h` to `main/wifi_credentials.h` and set `WIFI_SSID` and `WIFI_PASSWORD`. Without this file, the device starts the `labelprinter-setup` captive portal.
 3. Select the `ql700` PlatformIO environment.
 4. Connect the Super Mini's **USB-C** port to your PC and click **Build**, then **Upload**. Disconnect the printer/host adapter from that shared USB connection while flashing.
 5. Open **PlatformIO: Serial Monitor** at 115200 baud.
@@ -20,11 +20,11 @@ pio device monitor -e ql700
 
 Use `pio run -e ql700 -t upload --upload-port COMx` to select a specific Windows COM port.
 
-A healthy boot includes log lines indicating Wi-Fi association, `QL-700 attached over USB`, `labelsis.local`, and HTTP port 80. Then open **http://labelsis.local/** from a device on the same LAN.
+A healthy boot includes log lines indicating Wi-Fi association, `QL-700 attached over USB`, `labelprinter.local`, and HTTP port 80. Then open **http://labelprinter.local/** from a device on the same LAN.
 
 ## Wi-Fi onboarding
 
-If `main/wifi_credentials.h` is absent or the configured network cannot be reached, the ESP32 starts an open SoftAP named `labelsis-setup`. Connect to it and open `http://192.168.4.1/`, select your network, enter its password, and save. The credentials are stored in NVS.
+If `main/wifi_credentials.h` is absent or the configured network cannot be reached, the ESP32 starts an open SoftAP named `labelprinter-setup`. Connect to it and open `http://192.168.4.1/`, select your network, enter its password, and save. The credentials are stored in NVS.
 
 ## Status LED and BOOT button
 

@@ -5,7 +5,7 @@
 The HTTP API is unauthenticated by design (see [README §Security](../README.md#security)),
 so the OTA endpoint can't accept "anyone with network reach".
 
-LabelSis has two physical-state-proves-intent gates that open the
+LabelPrinter has two physical-state-proves-intent gates that open the
 OTA endpoint. Either one is enough; both close on reboot.
 
 1. **QL-700 in Editor Lite mode** -- slider in EL position. The default
@@ -51,7 +51,7 @@ For headless flashing, scripted rollouts, or any case where the
 SPA can't reach the device, use `scripts/labelsis-ota.py`:
 
 ```sh
-scripts/labelsis-ota.py --host labelsis.local \
+scripts/labelsis-ota.py --host labelprinter.local \
                         --file build/labelsis.bin
 ```
 
@@ -118,7 +118,7 @@ to USB, escalate in this order:
    true, "slot": "ota_X", "size": ...}`. Takes ~5-10 s; doesn't reboot.
 
    ```sh
-   curl -X POST http://labelsis.local/api/ota/erase-next
+   curl -X POST http://labelprinter.local/api/ota/erase-next
    ```
 
 3. **`POST /api/reboot`** (behind the same gate). Soft reboot via
@@ -128,7 +128,7 @@ to USB, escalate in this order:
    back ~5 s later.
 
    ```sh
-   curl -X POST http://labelsis.local/api/reboot
+   curl -X POST http://labelprinter.local/api/reboot
    ```
 
 4. **Hold the BOOT button for 30+ s** (physical). Wipes Wi-Fi creds

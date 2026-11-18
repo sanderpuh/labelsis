@@ -4,7 +4,7 @@ How to drive the device from the SPA once it's on the LAN.
 
 ## The web UI
 
-Open `http://labelsis.local/` (or the device IP) in a browser. Three views:
+Open `http://labelprinter.local/` (or the device IP) in a browser. Three views:
 
 - **Label** -- the canvas designer. Add text, images, barcodes, QR
   codes, icons, rectangles. Right-click an element for context
@@ -17,9 +17,22 @@ Open `http://labelsis.local/` (or the device IP) in a browser. Three views:
 - **Settings** -- Wi-Fi reconfig, API host (for SPA dev against a
   remote device), UI language.
 
-The current label design and view state auto-save to `localStorage`,
-so a reload picks up where you left off. The label library
-(top-right) keeps named designs for quick recall.
+The Label view is split into three focused modes:
+
+- **Custom label** -- the full canvas designer, layers, properties and CSV tools.
+- **Address label** -- enter up to five plain-text lines. Empty lines are ignored,
+  the longest line is fitted to the printable tape width, and the label feed length
+  grows with the number of lines. The example layout is a left-aligned text block
+  centred on the label, similar to a conventional address sticker. Address lines
+  are saved locally in the browser; printing uses the same 62 mm continuous-roll
+  QL-700 raster endpoint as custom labels.
+- **Shipping label** -- import a PDF, select the shipping-label area, review both
+  split halves, then print them or export a two-page PDF.
+
+The current custom label design, selected Label mode and view state auto-save to
+`localStorage`, so a reload picks up where you left off. Address lines are saved
+separately in the same browser. The label library (top-right) keeps named custom
+designs for quick recall.
 
 ## CSV-templated batch printing
 
@@ -43,6 +56,6 @@ prevent runaways.
 
 ## Editor Lite mode
 
-The QL-700 has a physical Editor Lite switch. In normal printer mode it exposes the USB printer interface used by LabelSis. In **Editor Lite (EL)** mode it exposes mass storage instead, so LabelSis cannot print. The SPA indicates Editor Lite mode when it detects USB ID `04F9:2049`. Switch back to normal printer mode; the ESP32-S3 USB host monitor will detect the QL-700 again automatically.
+The QL-700 has a physical Editor Lite switch. In normal printer mode it exposes the USB printer interface used by LabelPrinter. In **Editor Lite (EL)** mode it exposes mass storage instead, so LabelPrinter cannot print. The SPA indicates Editor Lite mode when it detects USB ID `04F9:2049`. Switch back to normal printer mode; the ESP32-S3 USB host monitor will detect the QL-700 again automatically.
 
 The Editor Lite state also opens the physical-presence gate for OTA updates. See [OTA.md](OTA.md).

@@ -1,4 +1,4 @@
-# LabelSis v0.8.3
+# LabelPrinter v0.8.3
 
 OTA hardening release. The headline goal: make Wi-Fi-only updates
 rock-solid for a device that's been built into a printer, with no
@@ -105,7 +105,7 @@ For a device that's no longer USB-accessible, escalate in order:
 - **`auto-cut` defaults to off** — the ~25 mm leader Brother feeds
   after each cut was an annoying surprise. Saved-session restore
   still honours whatever the user had previously.
-- **LabelSis app icon in the About panel** (top-right, clickable
+- **LabelPrinter app icon in the About panel** (top-right, clickable
   → homepage). Inlined at build time from `doc/labelsis_favicon_64.png`
   via `scripts/build_spa_assets.py` — no manual base64 paste, no
   corruption risk.
@@ -153,7 +153,7 @@ Standard OTA from v0.8.2:
 
 ```sh
 # device in P-Lite mode (slider to EL)
-scripts/labelsis-ota.py --host labelsis.local \
+scripts/labelsis-ota.py --host labelprinter.local \
     --file release/v0.8.3/labelsis-<board>-v0.8.3.bin
 ```
 
