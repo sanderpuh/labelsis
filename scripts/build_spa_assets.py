@@ -6,7 +6,7 @@ Reads from --spa-dir, writes to --output-dir:
 
     index.html              original index.html with qrcode.min.js
                             inlined as a <script>...</script> block
-                            and the LabelSis app icon (--icon-path)
+                            and the LabelPrinter app icon (--icon-path)
                             inlined as a base64 data: URL into the
                             __LABELSIS_ICON_DATA_URL__ placeholder
                             (saves an HTTP round-trip + a separate

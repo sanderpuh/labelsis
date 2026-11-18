@@ -31,9 +31,9 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 if(NOT IDF_TARGET STREQUAL "esp32s3")
     message(FATAL_ERROR
-        "LabelSis QL-700 firmware targets ESP32-S3 only; current IDF_TARGET=\"${IDF_TARGET}\". "
+        "LabelPrinter QL-700 firmware targets ESP32-S3 only; current IDF_TARGET=\"${IDF_TARGET}\". "
         "Select the PlatformIO ql700 environment.")
 endif()
 
-message(STATUS "LabelSis: Brother QL-700 / ESP32-S3 / PlatformIO")
+message(STATUS "LabelPrinter: Brother QL-700 / ESP32-S3 / PlatformIO")
 project(labelsis)

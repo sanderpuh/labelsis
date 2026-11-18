@@ -1,4 +1,4 @@
-"""Optional firmware-bundled TrueType fonts for LabelSis.
+"""Optional firmware-bundled TrueType fonts for LabelPrinter.
 
 This module is copied to scripts/bundled_fonts.py, then imported by both
 build_spa_assets.py and mock-server.py.  An empty fonts/custom/ folder leaves
@@ -31,7 +31,7 @@ def embed_bundled_fonts(html: str, spa_dir: str | Path) -> str:
         return html
 
     # Generate safe, human-readable family identifiers that won't collide
-    # with operating-system fonts or LabelSis's imported-font slot.
+    # with operating-system fonts or LabelPrinter's imported-font slot.
     names = []
     css = []
     seen = set()
@@ -57,9 +57,9 @@ def embed_bundled_fonts(html: str, spa_dir: str | Path) -> str:
         names.append(family)
 
     if html.count("</head>") != 1 or html.count("/* Sample in the picker") != 1:
-        raise ValueError("Expected LabelSis HTML head and FONTS list not found")
+        raise ValueError("Expected LabelPrinter HTML head and FONTS list not found")
     if len(re.findall(r"async\s+function\s+postPrint\s*\(\s*\)\s*\{", html)) != 1:
-        raise ValueError("Expected one postPrint() function in LabelSis HTML")
+        raise ValueError("Expected one postPrint() function in LabelPrinter HTML")
     if 'id="labelsis-bundled-fonts"' in html:
         raise ValueError("Bundled font CSS has already been injected")
 
@@ -80,7 +80,7 @@ const LABELSIS_BUNDLED_FONT_READY = Promise.all(
 );
 LABELSIS_BUNDLED_FONT_READY.then(
   () => {{ if (typeof redraw === "function") redraw(); }},
-  error => console.warn("LabelSis bundled fonts failed to load", error)
+  error => console.warn("LabelPrinter bundled fonts failed to load", error)
 );
 '''
     html = html.replace("/* Sample in the picker", js + "/* Sample in the picker", 1)

@@ -53,7 +53,7 @@ if not env.IsIntegrationDump() and "clean" not in COMMAND_LINE_TARGETS:
     idf_env["IDF_COMPONENT_OVERWRITE_MANAGED_COMPONENTS"] = "1"
     idf_env.pop("IDF_TOOLS_PATH", None)
 
-    print("Preparing LabelSis web assets with ESP-IDF environment...")
+    print("Preparing LabelPrinter web assets with ESP-IDF environment...")
 
     subprocess.run(
         [
