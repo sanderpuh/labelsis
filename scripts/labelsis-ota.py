@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-labelsis-ota.py -- upload a firmware image to a LabelSis device over HTTP.
+labelsis-ota.py -- upload a firmware image to a LabelPrinter device over HTTP.
 
 Mirrors what the SPA's "Firmware update" panel does (POST /api/ota), but
 from a terminal -- handy for headless flashing, scripted rollouts, or
-when the SPA can't reach the device because of a browser quirk (see
-an earlier Wi-Fi capture: socket starvation under aggressive polling).
+when the SPA can't reach the device because of a browser quirk. The
+response is read by HTTP Content-Length, not TCP EOF, so a reboot that
+interrupts the final FIN does not hide a complete OTA result.
 
 Stdlib-only (no `requests` dep).
 
 Usage:
-    labelsis-ota.py --host labelsis.local \\
+    labelsis-ota.py --host labelprinter.local \\
                     --file release/labelsis-devkitc_s3-v0.8.0.bin
 
 Exit codes:
@@ -44,7 +45,8 @@ def get_ota_status(conn: http.client.HTTPConnection) -> dict:
     return json.loads(body)
 
 
-def upload(host: str, port: int, path: Path, timeout: float, chunk: int) -> int:
+def upload(host: str, port: int, path: Path, timeout: float, chunk: int,
+           response_timeout: float) -> int:
     size = path.stat().st_size
     print(f"target: http://{host}:{port}/api/ota")
     print(f"image:  {path.name} ({size:,} bytes)")
@@ -152,56 +154,32 @@ def upload(host: str, port: int, path: Path, timeout: float, chunk: int) -> int:
         # though Content-Length was satisfied. curl never half-closes
         # and gets a clean response, so neither do we.
 
-        # Drain the response. Connection: close means the server
-        # FINs after the body, which gives us a clean EOF: keep
-        # recv()ing until we get b''. The response is small (one
-        # JSON line) so this is a few KB at most.
-        print("waiting for verify + response…", flush=True)
-        chunks = []
-        while True:
-            try:
-                buf = s.recv(4096)
-            except (socket.timeout, TimeoutError):
-                # No FIN yet -- the typical case after a successful
-                # OTA: the firmware sends the response then esp_restart()s
-                # ~2 s later, and esp_restart's hardware reset can yank
-                # the radio before the FIN flushes. We can't tell from
-                # here whether the upload was accepted or rejected --
-                # poll for boot completion and check whether running_slot
-                # flipped (the unambiguous "image installed" signal).
-                print("no response (typical -- reboot interrupted the FIN). "
-                      "Polling /api/status to check whether the image took…")
-                return _wait_for_reboot(host, port,
-                                        expect_slot_flip=pre_run_slot)
-            if not buf:
-                break
-            chunks.append(buf)
-        raw = b"".join(chunks)
+        # Parse the HTTP response using its Content-Length, not TCP EOF.
+        # The firmware deliberately sends its JSON response BEFORE the
+        # 2 s reboot delay. Waiting for Connection: close / FIN is fragile:
+        # the ESP32 can reset the Wi-Fi interface before the FIN reaches
+        # the client even though the complete response body was delivered.
+        # HTTPResponse stops reading as soon as Content-Length bytes arrive.
+        print("waiting for verify + HTTP response…", flush=True)
+        s.settimeout(response_timeout)
+        response = http.client.HTTPResponse(s)
+        try:
+            response.begin()
+            body_bytes = response.read()
+        except (socket.timeout, TimeoutError, ConnectionResetError,
+                http.client.HTTPException, OSError) as e:
+            print(f"\nno complete HTTP response ({e}); checking OTA slot…",
+                  file=sys.stderr, flush=True)
+            return _wait_for_reboot(host, port,
+                                    expect_slot_flip=pre_run_slot)
+        r = response
+        body = body_bytes.decode("utf-8", "replace")
     except OSError as e:
         print(f"\nerror: network failure during upload: {e}", file=sys.stderr)
         return 4
     finally:
         try: s.close()
         except Exception: pass
-
-    # Split status-line + headers + body. HTTP/1.1 framing.
-    head, _, body_bytes = raw.partition(b"\r\n\r\n")
-    first = head.split(b"\r\n", 1)[0]
-    try:
-        proto, status_str, *reason_parts = first.split(b" ", 2)
-        status = int(status_str)
-        reason = (reason_parts[0] if reason_parts else b"").decode(
-            "iso-8859-1", "replace")
-    except (ValueError, IndexError):
-        print(f"error: malformed response: {raw[:200]!r}", file=sys.stderr)
-        return 4
-    body = body_bytes.decode("utf-8", "replace")
-    # Synthesise a getresponse-shaped object so the success-handling
-    # code below stays unchanged.
-    class _R: pass
-    r = _R()
-    r.status = status
-    r.reason = reason
 
     if r.status >= 200 and r.status < 300:
         try:
@@ -279,10 +257,12 @@ def _wait_for_reboot(host: str, port: int, deadline_s: float = 90.0,
                         c2.close()
                         if expect_slot_flip and slot == expect_slot_flip:
                             print("warning: running_slot didn't flip "
-                                  f"({slot} unchanged) -- the upload was "
-                                  "rejected by the firmware (likely "
-                                  "image_validate, wrong_project, or "
-                                  "ota_write). Check device serial logs.",
+                                  f"({slot} unchanged) -- no successful OTA "
+                                  "slot switch was confirmed. The request may "
+                                  "have failed before set_boot, or the new image "
+                                  "may have rolled back. Check the HTTP error "
+                                  "body (if received), /api/ota/status, and "
+                                  "device serial logs.",
                                   file=sys.stderr)
                             return 5
                     except Exception:
@@ -302,12 +282,12 @@ def _wait_for_reboot(host: str, port: int, deadline_s: float = 90.0,
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
-        description="Upload a firmware image to a LabelSis device.",
+        description="Upload a firmware image to a LabelPrinter device.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__.split("Usage:", 1)[1].lstrip() if "Usage:" in __doc__ else "",
     )
     ap.add_argument("--host", required=True,
-                    help="device hostname or IP, e.g. labelsis.local or 192.168.1.42")
+                    help="device hostname or IP, e.g. labelprinter.local or 192.168.1.42")
     ap.add_argument("--port", type=int, default=80, help="HTTP port (default: 80)")
     ap.add_argument("--file", required=True, type=Path,
                     help="path to labelsis-<board>-<version>.bin (NOT -merged.bin)")
@@ -315,6 +295,9 @@ def main(argv=None) -> int:
                     help="per-request socket timeout, seconds (default: 180)")
     ap.add_argument("--chunk", type=int, default=16 * 1024,
                     help="upload chunk size in bytes (default: 16384)")
+    ap.add_argument("--response-timeout", type=float, default=30.0,
+                    help="seconds to wait for the HTTP response after upload (default: 30); "
+                         "the response is parsed by Content-Length, without waiting for TCP FIN")
     args = ap.parse_args(argv)
 
     if not args.file.exists():
@@ -329,7 +312,11 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 1
 
-    return upload(args.host, args.port, args.file, args.timeout, args.chunk)
+    if args.response_timeout <= 0:
+        print("error: --response-timeout must be positive", file=sys.stderr)
+        return 1
+    return upload(args.host, args.port, args.file, args.timeout, args.chunk,
+                  args.response_timeout)
 
 
 if __name__ == "__main__":

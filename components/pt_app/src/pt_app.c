@@ -1,7 +1,7 @@
 /*
  * pt_app -- Wi-Fi + HTTP + QL-700 transport glue. Owns:
  *   - NVS-persisted Wi-Fi creds with first-boot fallback to compiled-in
- *   - SoftAP onboarding ("labelsis-setup" + setup page) when no creds
+ *   - SoftAP onboarding ("labelprinter-setup" + setup page) when no creds
  *   - STA bring-up + transport open + mDNS + the HTTP API
  *   - long-press GPIO that wipes creds and re-enters AP mode
  */
@@ -14,6 +14,7 @@
 
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
+#include "esp_attr.h"
 #include "esp_crc.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
@@ -1140,6 +1141,59 @@ static esp_err_t api_icon_json(httpd_req_t *req)
 
 #include "esp_ota_ops.h"
 
+/* Retain OTA progress across esp_restart() so /api/ota/status can expose
+ * the last completed stage even when the serial monitor is unavailable.
+ * RTC_NOINIT is not cleared by a software reset; the magic guards against
+ * uninitialized contents after a cold power-up. */
+#define OTA_DIAG_MAGIC 0x4f544144u
+
+typedef struct {
+    uint32_t magic;
+    char stage[24];
+    char error[32];
+    char esp_err[40];
+    int received;
+    int total;
+    uint32_t task_stack_hwm_bytes;
+} ota_diag_t;
+
+RTC_NOINIT_ATTR static ota_diag_t s_ota_diag;
+
+static void ota_diag_init(void)
+{
+    if (s_ota_diag.magic == OTA_DIAG_MAGIC) return;
+    memset(&s_ota_diag, 0, sizeof s_ota_diag);
+    snprintf(s_ota_diag.stage, sizeof s_ota_diag.stage, "idle");
+    s_ota_diag.magic = OTA_DIAG_MAGIC;
+}
+
+static void ota_diag_mark(const char *stage, int received, int total)
+{
+    ota_diag_init();
+    snprintf(s_ota_diag.stage, sizeof s_ota_diag.stage, "%s",
+             stage ? stage : "unknown");
+    s_ota_diag.received = received;
+    s_ota_diag.total = total;
+    s_ota_diag.task_stack_hwm_bytes =
+        (uint32_t)uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+}
+
+static void ota_diag_fail(const char *reason, esp_err_t err)
+{
+    ota_diag_init();
+    snprintf(s_ota_diag.stage, sizeof s_ota_diag.stage, "failed");
+    snprintf(s_ota_diag.error, sizeof s_ota_diag.error, "%s",
+             reason ? reason : "unknown");
+    if (err == ESP_OK) {
+        s_ota_diag.esp_err[0] = '\0';
+    } else {
+        snprintf(s_ota_diag.esp_err, sizeof s_ota_diag.esp_err, "%s",
+                 esp_err_to_name(err));
+    }
+    s_ota_diag.task_stack_hwm_bytes =
+        (uint32_t)uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t);
+}
+
 static bool ota_editor_lite_gate(void)
 {
     return s_transport_state && strcmp(s_transport_state, "editor_lite") == 0;
@@ -1172,29 +1226,47 @@ static esp_err_t api_ota_status(httpd_req_t *req)
      * client like labelsis-ota.py) whether the slot is healthy enough
      * to accept the next OTA. Without it, a wedged slot looks
      * identical to a fresh one until the upload actually fails. */
+    ota_diag_init();
     const char *next_state = "unknown";
+    const char *next_state_error = next ? "" : "no_partition";
     esp_ota_img_states_t st_next;
-    if (next && esp_ota_get_state_partition(next, &st_next) == ESP_OK) {
-        switch (st_next) {
-            case ESP_OTA_IMG_NEW:            next_state = "new";            break;
-            case ESP_OTA_IMG_PENDING_VERIFY: next_state = "pending_verify"; break;
-            case ESP_OTA_IMG_VALID:          next_state = "valid";          break;
-            case ESP_OTA_IMG_INVALID:        next_state = "invalid";        break;
-            case ESP_OTA_IMG_ABORTED:        next_state = "aborted";        break;
-            case ESP_OTA_IMG_UNDEFINED:      next_state = "undefined";      break;
+    if (next) {
+        esp_err_t state_err = esp_ota_get_state_partition(next, &st_next);
+        if (state_err == ESP_OK) {
+            switch (st_next) {
+                case ESP_OTA_IMG_NEW:            next_state = "new";            break;
+                case ESP_OTA_IMG_PENDING_VERIFY: next_state = "pending_verify"; break;
+                case ESP_OTA_IMG_VALID:          next_state = "valid";          break;
+                case ESP_OTA_IMG_INVALID:        next_state = "invalid";        break;
+                case ESP_OTA_IMG_ABORTED:        next_state = "aborted";        break;
+                case ESP_OTA_IMG_UNDEFINED:      next_state = "undefined";      break;
+            }
+        } else {
+            next_state_error = esp_err_to_name(state_err);
         }
     }
-    char body[400];
+    char body[768];
     int n = snprintf(body, sizeof body,
         "{\"available\":%s,\"reason\":\"%s\","
         "\"running_slot\":\"%s\",\"next_slot\":\"%s\","
-        "\"next_slot_state\":\"%s\","
+        "\"next_slot_state\":\"%s\",\"next_slot_state_error\":\"%s\","
+        "\"last_ota\":{\"stage\":\"%s\",\"error\":\"%s\","
+        "\"esp_err\":\"%s\",\"received\":%d,\"total\":%d,"
+        "\"task_stack_hwm_bytes\":%u},\"reset_reason\":%d,"
         "\"app\":{\"name\":\"%s\",\"version\":\"%s\"}}",
         open ? "true" : "false",
         reason,
         run  ? run->label  : "?",
         next ? next->label : "?",
         next_state,
+        next_state_error,
+        s_ota_diag.stage,
+        s_ota_diag.error,
+        s_ota_diag.esp_err,
+        s_ota_diag.received,
+        s_ota_diag.total,
+        (unsigned)s_ota_diag.task_stack_hwm_bytes,
+        (int)esp_reset_reason(),
         app ? app->project_name : "",
         app ? app->version      : "");
     return httpd_resp_send(req, body, n);
@@ -1230,6 +1302,7 @@ static esp_err_t ota_fail(httpd_req_t *req, esp_ota_handle_t h,
                           const char *status, const char *reason,
                           esp_err_t esp_err, int drain_bytes)
 {
+    ota_diag_fail(reason, esp_err);
     if (h) esp_ota_abort(h);
     if (drain_bytes > 0) drain_request_body(req, drain_bytes);
     cors_headers(req);
@@ -1289,6 +1362,10 @@ static esp_err_t ota_begin_with_retry(const esp_partition_t *part,
 static esp_err_t api_ota_upload_inner(httpd_req_t *req)
 {
     int total = req->content_len;
+    ota_diag_init();
+    s_ota_diag.error[0] = '\0';
+    s_ota_diag.esp_err[0] = '\0';
+    ota_diag_mark("starting", 0, total);
     if (!ota_gate_open()) {
         return ota_fail(req, 0, "403 Forbidden", "gate_closed",
                         ESP_OK, total);
@@ -1309,6 +1386,7 @@ static esp_err_t api_ota_upload_inner(httpd_req_t *req)
     ESP_LOGI(TAG, "ota: starting upload to slot %s (%d bytes incoming)",
              next->label, total);
 
+    ota_diag_mark("beginning", 0, total);
     esp_ota_handle_t ota = 0;
     esp_err_t err = ota_begin_with_retry(next, &ota);
     if (err != ESP_OK) {
@@ -1321,6 +1399,7 @@ static esp_err_t api_ota_upload_inner(httpd_req_t *req)
     /* Stream the request body straight into flash. 1 KB chunks keep
      * the stack budget and the per-write erase-cycle overhead modest;
      * the limiting factor is flash write throughput, not RAM. */
+    ota_diag_mark("receiving", 0, total);
     char buf[1024];
     int  remaining       = total;
     int  written         = 0;
@@ -1411,8 +1490,13 @@ static esp_err_t api_ota_upload_inner(httpd_req_t *req)
         }
         written   += got;
         remaining -= got;
+        /* RTC-backed progress costs no flash writes and survives a
+         * panic/reset, exposing the last received offset. */
+        ota_diag_mark("receiving", written, total);
     }
 
+    ota_diag_mark("validating", written, total);
+    ESP_LOGI(TAG, "ota: received %d bytes; validating image", written);
     err = esp_ota_end(ota);
     if (err != ESP_OK) {
         /* esp_ota_end validates the SHA-in-header against the bytes we
@@ -1425,12 +1509,19 @@ static esp_err_t api_ota_upload_inner(httpd_req_t *req)
                         err, 0);
     }
 
-    /* After SHA passes, sanity-check that this is actually a LabelSis
+    /* After SHA passes, sanity-check that this is actually a LabelPrinter
      * binary -- otherwise a stray ESP32 firmware uploaded to /api/ota
      * could brick the device on next boot. */
-    esp_app_desc_t new_desc;
-    if (esp_ota_get_partition_description(next, &new_desc) == ESP_OK
-        && strcmp(new_desc.project_name, "labelsis") != 0) {
+    ota_diag_mark("image_valid", written, total);
+    esp_app_desc_t new_desc = {0};
+    err = esp_ota_get_partition_description(next, &new_desc);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ota: partition description read failed: %s",
+                 esp_err_to_name(err));
+        return ota_fail(req, 0, "500 Internal Server Error",
+                        "image_description", err, 0);
+    }
+    if (strcmp(new_desc.project_name, "labelsis") != 0) {
         ESP_LOGE(TAG, "ota: project_name mismatch \"%s\" != \"labelsis\"",
                  new_desc.project_name);
         /* Image is on disk but never made boot target; next OTA will
@@ -1439,6 +1530,7 @@ static esp_err_t api_ota_upload_inner(httpd_req_t *req)
                         ESP_OK, 0);
     }
 
+    ota_diag_mark("setting_boot", written, total);
     err = esp_ota_set_boot_partition(next);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "ota: set_boot failed: %s", esp_err_to_name(err));
@@ -1446,6 +1538,7 @@ static esp_err_t api_ota_upload_inner(httpd_req_t *req)
                         err, 0);
     }
 
+    ota_diag_mark("boot_selected", written, total);
     ESP_LOGI(TAG, "ota: %d bytes accepted, version=\"%s\", booting from %s",
              written, new_desc.version, next->label);
 
@@ -1460,10 +1553,19 @@ static esp_err_t api_ota_upload_inner(httpd_req_t *req)
     int n = snprintf(body, sizeof body,
         "{\"ok\":true,\"slot\":\"%s\",\"version\":\"%s\",\"reboot_in_ms\":2000}",
         next->label, new_desc.version);
-    httpd_resp_send(req, body, n);
+    esp_err_t send_err = httpd_resp_send(req, body, n);
+    if (send_err != ESP_OK) {
+        ota_diag_fail("success_response_send", send_err);
+        ESP_LOGE(TAG, "ota: success response send failed: %s",
+                 esp_err_to_name(send_err));
+    } else {
+        ota_diag_mark("response_sent", written, total);
+        ESP_LOGI(TAG, "ota: success response sent; restarting in 2 s");
+    }
 
     /* Defer the reboot to a small delay so the response actually
      * lands. esp_restart returns void and triggers SoC reset. */
+    ota_diag_mark("rebooting", written, total);
     vTaskDelay(pdMS_TO_TICKS(2000));
     esp_restart();
     return ESP_OK;   /* unreachable */
@@ -1573,9 +1675,15 @@ static void ota_confirm_running_image(void)
     esp_ota_img_states_t st;
     if (esp_ota_get_state_partition(run, &st) != ESP_OK) return;
     if (st == ESP_OTA_IMG_PENDING_VERIFY) {
-        if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK) {
+        esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+        if (err == ESP_OK) {
+            ota_diag_mark("boot_confirmed", 0, 0);
             ESP_LOGI(TAG, "ota: confirmed running image (slot %s) -- rollback cancelled",
                      run->label);
+        } else {
+            ota_diag_fail("boot_confirm_failed", err);
+            ESP_LOGE(TAG, "ota: failed to confirm running image: %s",
+                     esp_err_to_name(err));
         }
     }
 }
@@ -1599,6 +1707,10 @@ static esp_err_t http_up(uint16_t port)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.server_port      = port ? port : 80;
+    /* OTA performs flash writes and full image validation inside the
+     * HTTP server task. Give the ESP-IDF OTA call chain more headroom
+     * than HTTP server's 4 KiB default. */
+    cfg.stack_size       = 8192;
     cfg.lru_purge_enable = true;
     /* Wildcard matching enables the OPTIONS catch-all below; specific
      * routes still match exactly. */
@@ -1731,7 +1843,7 @@ static esp_err_t http_up(uint16_t port)
 
 /* AP onboarding */
 
-#define AP_SETUP_SSID "labelsis-setup"
+#define AP_SETUP_SSID "labelprinter-setup"
 
 /* Catch-all GET handler -- serves the setup page for /, captive-portal
  * detection URLs (Apple/Android/Microsoft probes), and any unknown
@@ -2057,8 +2169,8 @@ static esp_err_t mdns_up(void)
 {
     esp_err_t err = mdns_init();
     if (err != ESP_OK) return err;
-    mdns_hostname_set("labelsis");
-    mdns_instance_name_set("LabelSis print server");
+    mdns_hostname_set("labelprinter");
+    mdns_instance_name_set("LabelPrinter print server");
     /* Advertise the HTTP service on the configured port. */
     mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
     return ESP_OK;
@@ -2194,7 +2306,7 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
     transport_up(cfg);
 
     if (mdns_up() == ESP_OK) {
-        ESP_LOGI(TAG, "mdns: labelsis.local up");
+        ESP_LOGI(TAG, "mdns: labelprinter.local up");
     } else {
         ESP_LOGW(TAG, "mdns: init failed (use the IP address instead)");
     }
