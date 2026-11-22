@@ -22,6 +22,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -411,6 +412,58 @@ static void reset_button_up(int gpio)
 static EventGroupHandle_t s_wifi_event_group;
 static int                s_retry_count;
 
+/* The startup connection loop deliberately has a finite retry budget per
+ * configured AP. Once the device has obtained an IP, however, a later router
+ * restart or brief RF outage must not permanently strand the web server.
+ * Retry runtime disconnects forever with capped exponential backoff. */
+#define WIFI_RECONNECT_MIN_MS 1000U
+#define WIFI_RECONNECT_MAX_MS 30000U
+static esp_timer_handle_t s_wifi_reconnect_timer;
+static bool               s_wifi_reconnect_timer_ready;
+static bool               s_wifi_ever_connected;
+static uint32_t           s_wifi_reconnect_delay_ms = WIFI_RECONNECT_MIN_MS;
+
+static void wifi_runtime_reconnect_timer_cb(void *arg)
+{
+    (void)arg;
+    esp_err_t err = esp_wifi_connect();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
+        ESP_LOGW(TAG, "wifi: scheduled reconnect failed: %s", esp_err_to_name(err));
+    }
+}
+
+static void wifi_schedule_runtime_reconnect(void)
+{
+    if (!s_wifi_reconnect_timer_ready) {
+        /* Timer creation is best-effort; preserve reconnection if it failed. */
+        esp_err_t err = esp_wifi_connect();
+        if (err != ESP_OK && err != ESP_ERR_WIFI_CONN)
+            ESP_LOGW(TAG, "wifi: reconnect fallback failed: %s", esp_err_to_name(err));
+        return;
+    }
+    if (esp_timer_is_active(s_wifi_reconnect_timer)) return;
+
+    const uint32_t delay_ms = s_wifi_reconnect_delay_ms;
+    esp_err_t err = esp_timer_start_once(s_wifi_reconnect_timer,
+                                         (uint64_t)delay_ms * 1000ULL);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "wifi: could not schedule reconnect: %s; trying immediately",
+                 esp_err_to_name(err));
+        esp_err_t connect_err = esp_wifi_connect();
+        if (connect_err != ESP_OK && connect_err != ESP_ERR_WIFI_CONN)
+            ESP_LOGW(TAG, "wifi: immediate reconnect failed: %s",
+                     esp_err_to_name(connect_err));
+        return;
+    }
+    ESP_LOGW(TAG, "wifi: link lost; retrying in %lu ms",
+             (unsigned long)delay_ms);
+    if (s_wifi_reconnect_delay_ms < WIFI_RECONNECT_MAX_MS) {
+        uint32_t next = s_wifi_reconnect_delay_ms * 2U;
+        s_wifi_reconnect_delay_ms = next > WIFI_RECONNECT_MAX_MS
+            ? WIFI_RECONNECT_MAX_MS : next;
+    }
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t base,
                                int32_t id, void *data)
 {
@@ -425,17 +478,26 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
             esp_wifi_connect();
         }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_count < WIFI_MAX_RETRIES) {
+        if (s_wifi_ever_connected) {
+            /* Runtime outages must not consume the startup retry budget or
+             * leave the HTTP server permanently disconnected from Wi-Fi. */
+            wifi_schedule_runtime_reconnect();
+        } else if (s_retry_count < WIFI_MAX_RETRIES) {
             esp_wifi_connect();
             s_retry_count++;
-            ESP_LOGI(TAG, "wifi reconnect %d", s_retry_count);
+            ESP_LOGI(TAG, "wifi initial reconnect %d/%d", s_retry_count,
+                     WIFI_MAX_RETRIES);
         } else {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *e = data;
         ESP_LOGI(TAG, "got IP: " IPSTR, IP2STR(&e->ip_info.ip));
+        s_wifi_ever_connected = true;
         s_retry_count = 0;
+        s_wifi_reconnect_delay_ms = WIFI_RECONNECT_MIN_MS;
+        if (s_wifi_reconnect_timer_ready && esp_timer_is_active(s_wifi_reconnect_timer))
+            esp_timer_stop(s_wifi_reconnect_timer);
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STACONNECTED) {
         ESP_LOGI(TAG, "ap: client joined");
@@ -458,6 +520,22 @@ static esp_err_t wifi_init_once(void)
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    const esp_timer_create_args_t reconnect_timer_args = {
+        .callback = wifi_runtime_reconnect_timer_cb,
+        .arg = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "wifi_reconnect"
+    };
+    esp_err_t timer_err = esp_timer_create(&reconnect_timer_args,
+                                            &s_wifi_reconnect_timer);
+    if (timer_err == ESP_OK) {
+        s_wifi_reconnect_timer_ready = true;
+    } else {
+        ESP_LOGW(TAG, "wifi: reconnect timer unavailable: %s; using direct retries",
+                 esp_err_to_name(timer_err));
+    }
+
     esp_netif_create_default_wifi_sta();
     esp_netif_create_default_wifi_ap();
 

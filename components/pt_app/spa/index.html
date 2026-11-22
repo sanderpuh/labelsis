@@ -152,6 +152,7 @@ main { max-width:720px; margin:0 auto; padding:1rem; display:flex; flex-directio
 .shipping-crop-handle[data-handle="sw"] { left:0; top:100%; }
 .shipping-crop-handle[data-handle="w"] { left:0; top:50%; }
 .shipping-pdf-split-band { position:absolute; z-index:1; left:0; right:0; top:50%; height:0; transform:translateY(-50%); box-sizing:border-box; background:rgba(245,158,11,.24); border-top:1px dashed #b45309; border-bottom:1px dashed #b45309; pointer-events:none; }
+.shipping-pdf-split-band.vertical { left:50%; right:auto; top:0; bottom:0; width:0; height:100%; transform:translateX(-50%); border-top:0; border-bottom:0; border-left:1px dashed #b45309; border-right:1px dashed #b45309; }
 .shipping-split-tools { margin-top:.75rem; padding-top:.7rem; border-top:1px solid var(--line); }
 .shipping-split-help { margin:.4rem 0 .65rem; font-size:.8rem; color:var(--muted); }
 .shipping-split-previews { display:grid; grid-template-columns:1fr; gap:.65rem; }
@@ -1029,26 +1030,33 @@ dialog menu { display:flex; gap:.5rem; justify-content:flex-end; padding:0; marg
         <p id="shipping-crop-help" class="muted" style="margin:.65rem 0 0;" data-i18n="shipping.crop.help" hidden>Drag over the page to select the shipping-label area. Drag again to replace the selection.</p>
         <p id="shipping-crop-size" class="muted" style="margin:.4rem 0 0;" aria-live="polite" hidden></p>
         <div id="shipping-split-tools" class="shipping-split-tools" hidden>
+          <div class="row" style="align-items:center; margin-bottom:.45rem;">
+            <label for="shipping-split-axis" data-i18n="shipping.split.direction">Split direction</label>
+            <select id="shipping-split-axis" style="max-width:150px; min-width:120px;">
+              <option value="horizontal" selected data-i18n="shipping.split.horizontal">Horizontal divider</option>
+              <option value="vertical" data-i18n="shipping.split.vertical">Vertical divider</option>
+            </select>
+          </div>
           <div class="row" style="align-items:center;">
             <label for="shipping-split-overlap" data-i18n="shipping.split.overlap">Overlap on print</label>
             <input id="shipping-split-overlap" type="number" min="0" max="20" step="0.5" value="3" inputmode="decimal" style="width:5.25rem;">
             <span class="muted" data-i18n="shipping.split.unit">mm</span>
           </div>
-          <p class="shipping-split-help" data-i18n="shipping.split.help">The selected area is split horizontally at its midpoint. Both halves are rotated 90° clockwise. Artwork is limited to the QL-700's 58.9 mm printable band (696 dots), not the full 62 mm roll width. Overlap is measured on the finished print.</p>
+          <p id="shipping-split-help" class="shipping-split-help">The selected area is split horizontally at its midpoint. Both halves are rotated 90° clockwise. Artwork is limited to the QL-700's 58.9 mm printable band (696 dots), not the full 62 mm roll width. Overlap is measured on the finished print.</p>
           <div class="shipping-split-previews">
             <div class="shipping-split-card">
               <div class="shipping-split-card-header">
-                <strong data-i18n="shipping.split.top">Label 1 — top half</strong>
+                <strong id="shipping-split-first-title" data-i18n="shipping.split.top">Label 1 — top half</strong>
                 <span id="shipping-split-top-size" class="muted"></span>
               </div>
-              <canvas id="shipping-split-top" aria-label="Top shipping label half preview"></canvas>
+              <canvas id="shipping-split-top" aria-label="First shipping label preview"></canvas>
             </div>
             <div class="shipping-split-card">
               <div class="shipping-split-card-header">
-                <strong data-i18n="shipping.split.bottom">Label 2 — bottom half</strong>
+                <strong id="shipping-split-second-title" data-i18n="shipping.split.bottom">Label 2 — bottom half</strong>
                 <span id="shipping-split-bottom-size" class="muted"></span>
               </div>
-              <canvas id="shipping-split-bottom" aria-label="Bottom shipping label half preview"></canvas>
+              <canvas id="shipping-split-bottom" aria-label="Second shipping label preview"></canvas>
             </div>
           </div>
           <p id="shipping-output-resolution" class="muted" style="margin:.45rem 0 0; font-size:.78rem;" aria-live="polite" hidden></p>
@@ -1256,11 +1264,17 @@ const STRINGS = {
     "shipping.crop.none":      "No crop area selected",
     "shipping.crop.outside":   "The crop is completely outside the PDF page. Move it so it includes part of the page.",
     "shipping.crop.size":      "Selected area: {width} × {height} mm",
+    "shipping.split.direction": "Split direction",
+    "shipping.split.horizontal": "Horizontal divider",
+    "shipping.split.vertical": "Vertical divider",
     "shipping.split.overlap":  "Overlap on print",
     "shipping.split.unit":     "mm",
-    "shipping.split.help":     "The selected area is split horizontally at its midpoint. Both halves are rotated 90° clockwise. Artwork is limited to the QL-700's 58.9 mm printable band (696 dots), not the full 62 mm roll width. Overlap is measured on the finished print.",
+    "shipping.split.help":     "The selected area is split horizontally at its midpoint. Both halves are rotated 90° clockwise. Use this for PDFs where the two labels are stacked. Artwork is limited to the QL-700's 58.9 mm printable band (696 dots); overlap is measured on the finished print.",
+    "shipping.split.vertical.help": "The selected area is split vertically at its midpoint. Each half keeps its source orientation. Use this for PDFs where the two labels are side by side. Artwork is limited to the 58.9 mm printable band (696 dots); overlap is measured on the finished print.",
     "shipping.split.top":      "Label 1 — top half",
     "shipping.split.bottom":   "Label 2 — bottom half",
+    "shipping.split.left":     "Label 1 — left half",
+    "shipping.split.right":    "Label 2 — right half",
     "shipping.output.resolution": "Final output: {width} × {height} px per half at {dpi} DPI (feed length × printable tape width). Each half is enlarged or reduced proportionally to use as much of the 58.9 mm printable tape width as possible. Rendered from the original PDF at the required source resolution; the on-screen preview is scaled.",
     "shipping.output.tooLarge": "The selected area is too large for high-resolution output ({width} × {height} pixels). Reduce the crop size and try again.",
     "shipping.output.renderCancelled": "High-resolution rendering was cancelled. Please try again.",
@@ -1582,35 +1596,39 @@ let deviceInfo = null;  // last /api/info  response (cached, refreshed on demand
  * POST -- otherwise an in-flight GET that's already past Firefox's
  * per-host TCP cap would still block the OTA POST from leaving the
  * browser. The flag alone only stops the *next* tick. */
-let otaInFlight    = false;
-let statusAbortCtl = null;
+let otaInFlight       = false;
+let statusAbortCtl    = null;
+let statusPollInFlight = false;
 
 async function refreshStatus() {
-  if (otaInFlight) return;
-  /* If a previous tick is somehow still pending, cancel it -- a hung
-   * fetch (e.g. device briefly unreachable) shouldn't pin a socket
-   * for the next tick. */
-  if (statusAbortCtl) { try { statusAbortCtl.abort(); } catch {} }
-  statusAbortCtl = (typeof AbortController !== "undefined") ? new AbortController() : null;
-  const sig = statusAbortCtl ? statusAbortCtl.signal : undefined;
+  /* Never stack overlapping status requests. The server has a deliberately
+   * small socket pool; aborting a still-running request every 3 s can leave
+   * the HTTP handler finishing work after the browser has already opened the
+   * next connection. A single-flight poll avoids accumulating that pressure. */
+  if (otaInFlight || statusPollInFlight) return;
+  statusPollInFlight = true;
+  const controller = (typeof AbortController !== "undefined") ? new AbortController() : null;
+  statusAbortCtl = controller;
+  const sig = controller ? controller.signal : undefined;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
   try {
-    const r = await fetch(apiURL("/api/status"), { signal: sig });
+    const r = await fetch(apiURL("/api/status"), { signal: sig, cache: "no-store" });
     const j = await r.json();
     printer = j;
     setConnState(j);
     renderStatus(j);
     redraw();
   } catch (e) {
-    /* AbortError is intentional (otaUpload cancels in-flight polls
-     * to free a socket for the multi-MB POST) -- don't flip the UI
-     * to "offline" just because we cancelled ourselves. */
-    if (e && e.name === "AbortError") return;
-    /* Network unreachable -- treat as "no printer" so the dot goes
-     * red and Print disables. Stays that way until the next poll
-     * comes back or the user fixes the apiHost setting. */
+    /* OTA intentionally cancels the one in-flight poll to free a socket for
+     * its multi-MB POST. A timeout outside OTA is a real failed health check. */
+    if (e && e.name === "AbortError" && otaInFlight) return;
     printer = null;
     setConnState(null);
     renderStatus(null);
+  } finally {
+    if (timeoutId !== null) clearTimeout(timeoutId);
+    if (statusAbortCtl === controller) statusAbortCtl = null;
+    statusPollInFlight = false;
   }
   /* Re-evaluate after every poll, not just on the network-error path.
    * Otherwise a printer that goes online -> 503 (waiting / editor_lite) keeps
@@ -4401,6 +4419,10 @@ const shippingPdfSelect = document.getElementById("shipping-pdf-select");
 const shippingPdfCropRect = document.getElementById("shipping-pdf-crop-rect");
 const shippingPdfSplitBand = document.getElementById("shipping-pdf-split-band");
 const shippingSplitTools = document.getElementById("shipping-split-tools");
+const shippingSplitAxisInput = document.getElementById("shipping-split-axis");
+const shippingSplitHelp = document.getElementById("shipping-split-help");
+const shippingSplitFirstTitle = document.getElementById("shipping-split-first-title");
+const shippingSplitSecondTitle = document.getElementById("shipping-split-second-title");
 const shippingSplitOverlapInput = document.getElementById("shipping-split-overlap");
 const shippingSplitTopCanvas = document.getElementById("shipping-split-top");
 const shippingSplitBottomCanvas = document.getElementById("shipping-split-bottom");
@@ -4435,6 +4457,8 @@ function resetShippingCrop() {
   shippingCropDrag = null;
   shippingCropSelection = null;
   shippingPdfCropRect.style.display = "none";
+  shippingPdfSplitBand.classList.remove("vertical");
+  shippingPdfSplitBand.style.width = "0";
   shippingPdfSplitBand.style.height = "0";
   shippingCropReset.hidden = true;
   shippingCropSize.hidden = true;
@@ -4463,8 +4487,20 @@ function updateShippingCropVisual() {
   updateShippingSplitGuide();
 }
 
+function isShippingSplitVertical() {
+  return shippingSplitAxisInput.value === "vertical";
+}
+
+function updateShippingSplitModeLabels() {
+  const vertical = isShippingSplitVertical();
+  shippingSplitHelp.textContent = t(vertical ? "shipping.split.vertical.help" : "shipping.split.help");
+  shippingSplitFirstTitle.textContent = t(vertical ? "shipping.split.left" : "shipping.split.top");
+  shippingSplitSecondTitle.textContent = t(vertical ? "shipping.split.right" : "shipping.split.bottom");
+}
+
 function updateShippingSplitGuide() {
   if (!shippingCropSelection || !shippingPdfViewport || !shippingPdfPageSize) {
+    shippingPdfSplitBand.style.width = "0";
     shippingPdfSplitBand.style.height = "0";
     return;
   }
@@ -4472,13 +4508,25 @@ function updateShippingSplitGuide() {
   const cropWidthMm = crop.width * shippingPdfPageSize.width * 25.4 / 72;
   const cropHeightMm = crop.height * shippingPdfPageSize.height * 25.4 / 72;
   if (!(cropWidthMm > 0) || !(cropHeightMm > 0)) {
+    shippingPdfSplitBand.style.width = "0";
     shippingPdfSplitBand.style.height = "0";
     return;
   }
+  const vertical = isShippingSplitVertical();
+  const splitDimensionMm = vertical ? cropWidthMm : cropHeightMm;
+  const feedDimensionMm = vertical ? cropHeightMm : cropWidthMm;
   const requestedOverlapValue = Number(shippingSplitOverlapInput.value);
   const requestedOverlapMm = Number.isFinite(requestedOverlapValue) ? requestedOverlapValue : 3;
-  const splitSizing = getShippingSplitSizing(cropHeightMm, requestedOverlapMm, cropWidthMm);
-  shippingPdfSplitBand.style.height = `${splitSizing.overlapFraction * 100}%`;
+  const splitSizing = getShippingSplitSizing(splitDimensionMm, requestedOverlapMm, feedDimensionMm);
+  if (vertical) {
+    shippingPdfSplitBand.classList.add("vertical");
+    shippingPdfSplitBand.style.width = `${splitSizing.overlapFraction * 100}%`;
+    shippingPdfSplitBand.style.height = "100%";
+  } else {
+    shippingPdfSplitBand.classList.remove("vertical");
+    shippingPdfSplitBand.style.width = "100%";
+    shippingPdfSplitBand.style.height = `${splitSizing.overlapFraction * 100}%`;
+  }
 }
 
 function updateShippingPageControls() {
@@ -4506,38 +4554,37 @@ function shippingPdfRectFromViewport(x1, y1, x2, y2) {
           Math.max(p1[0], p2[0]), Math.max(p1[1], p2[1])];
 }
 
-/* Scale the two horizontal halves to use as much of the printable tape
- * width as possible, both up and down. Each half's finished cross-tape
- * dimension is (cropHeight * scale + overlap) / 2. Keep the resulting feed
- * length within the QL-700's 250 mm (2952-row) raster limit as well. */
-function getShippingSplitSizing(cropHeightMm, requestedOverlapMm, cropWidthMm = 0) {
+/* Scale the two halves so the dimension created by the divider uses as much
+ * of the printable tape width as possible. The other crop dimension becomes
+ * the variable feed length. Keep that feed within the QL-700's 250 mm limit. */
+function getShippingSplitSizing(splitDimensionMm, requestedOverlapMm, feedDimensionMm = 0) {
   const requested = shippingClamp(Number.isFinite(requestedOverlapMm) ? requestedOverlapMm : 3, 0, 20);
   const maxFeedLengthMm = SHIPPING_MAX_FEED_ROWS * 25.4 / currentDpi();
-  const maxScaleByFeed = cropWidthMm > 0 ? maxFeedLengthMm / cropWidthMm : Infinity;
+  const maxScaleByFeed = feedDimensionMm > 0 ? maxFeedLengthMm / feedDimensionMm : Infinity;
 
   /* Do not cap this at 1: small selections must be enlarged to fill the
    * printable band. Vector PDF content is rendered later at dpi * tapeScale,
    * so the enlargement does not come from the small on-screen preview. */
   let tapeScale = Math.min(
-    Math.max(0, (2 * SHIPPING_PRINT_WIDTH_MM - requested) / cropHeightMm),
+    Math.max(0, (2 * SHIPPING_PRINT_WIDTH_MM - requested) / splitDimensionMm),
     maxScaleByFeed
   );
-  let maxOverlapMm = Math.max(0, cropHeightMm * tapeScale * 0.8);
+  let maxOverlapMm = Math.max(0, splitDimensionMm * tapeScale * 0.8);
   let overlapMm = Math.min(requested, maxOverlapMm);
 
   /* If the 80% overlap guard reduced the requested overlap, recalculate the
    * maximum fit scale using the overlap that will actually be printed. */
   if (overlapMm + 1e-6 < requested) {
     tapeScale = Math.min(
-      Math.max(0, (2 * SHIPPING_PRINT_WIDTH_MM - overlapMm) / cropHeightMm),
+      Math.max(0, (2 * SHIPPING_PRINT_WIDTH_MM - overlapMm) / splitDimensionMm),
       maxScaleByFeed
     );
-    maxOverlapMm = Math.max(0, cropHeightMm * tapeScale * 0.8);
+    maxOverlapMm = Math.max(0, splitDimensionMm * tapeScale * 0.8);
     overlapMm = Math.min(overlapMm, maxOverlapMm);
   }
 
   const sourceOverlapMm = tapeScale > 0 ? overlapMm / tapeScale : 0;
-  const overlapFraction = shippingClamp(sourceOverlapMm / cropHeightMm, 0, 0.8);
+  const overlapFraction = shippingClamp(sourceOverlapMm / splitDimensionMm, 0, 0.8);
   return { tapeScale, overlapMm, overlapFraction };
 }
 
@@ -4550,44 +4597,63 @@ function getShippingSplitGeometry() {
   const heightMm = crop.height * shippingPdfPageSize.height * 25.4 / 72;
   if (!(widthMm > 0) || !(heightMm > 0)) return null;
 
-  /* The selection is split horizontally. After the 90-degree output
-   * rotation, each half's source-PDF height becomes the tape's cross-width;
-   * the source-PDF width becomes the variable feed length. Fit the half-height
-   * (including half of the overlap) to the 696-dot printable band, not the
-   * source-PDF width. */
+  const vertical = isShippingSplitVertical();
+  /* Horizontal divider: source height is split across the tape width and
+   * source width becomes feed length. Vertical divider swaps those axes,
+   * which is useful when the two source labels are side by side. */
+  const splitDimensionMm = vertical ? widthMm : heightMm;
+  const feedDimensionMm = vertical ? heightMm : widthMm;
   const requestedOverlapMm = Number(shippingSplitOverlapInput.value);
-  const splitSizing = getShippingSplitSizing(heightMm,
-    Number.isFinite(requestedOverlapMm) ? requestedOverlapMm : 3, widthMm);
+  const splitSizing = getShippingSplitSizing(splitDimensionMm,
+    Number.isFinite(requestedOverlapMm) ? requestedOverlapMm : 3, feedDimensionMm);
   const { tapeScale, overlapMm, overlapFraction } = splitSizing;
 
   const x1 = crop.x * shippingPdfViewport.width;
   const x2 = (crop.x + crop.width) * shippingPdfViewport.width;
   const y1 = crop.y * shippingPdfViewport.height;
   const y2 = (crop.y + crop.height) * shippingPdfViewport.height;
-  const middleY = (y1 + y2) / 2;
-  const overlapCssPx = (y2 - y1) * overlapFraction;
-  const topEndY = middleY + overlapCssPx / 2;
-  const bottomStartY = middleY - overlapCssPx / 2;
+  const sourceWidth = crop.width * shippingPdfCanvas.width;
+  const sourceHeight = crop.height * shippingPdfCanvas.height;
+  const halfWithOverlap = 0.5 + overlapFraction / 2;
+  let firstSourceX = 0, firstSourceY = 0, firstSourceWidth = sourceWidth, firstSourceHeight = sourceHeight;
+  let secondSourceX = 0, secondSourceY = 0, secondSourceWidth = sourceWidth, secondSourceHeight = sourceHeight;
+  let firstPdfRect, secondPdfRect;
 
+  if (vertical) {
+    const middleX = (x1 + x2) / 2;
+    const overlapCssPx = (x2 - x1) * overlapFraction;
+    const firstEndX = middleX + overlapCssPx / 2;
+    const secondStartX = middleX - overlapCssPx / 2;
+    firstSourceWidth = sourceWidth * halfWithOverlap;
+    secondSourceX = sourceWidth * (0.5 - overlapFraction / 2);
+    secondSourceWidth = sourceWidth * halfWithOverlap;
+    firstPdfRect = shippingPdfRectFromViewport(x1, y1, firstEndX, y2);
+    secondPdfRect = shippingPdfRectFromViewport(secondStartX, y1, x2, y2);
+  } else {
+    const middleY = (y1 + y2) / 2;
+    const overlapCssPx = (y2 - y1) * overlapFraction;
+    const firstEndY = middleY + overlapCssPx / 2;
+    const secondStartY = middleY - overlapCssPx / 2;
+    firstSourceHeight = sourceHeight * halfWithOverlap;
+    secondSourceY = sourceHeight * (0.5 - overlapFraction / 2);
+    secondSourceHeight = sourceHeight * halfWithOverlap;
+    firstPdfRect = shippingPdfRectFromViewport(x1, y1, x2, firstEndY);
+    secondPdfRect = shippingPdfRectFromViewport(x1, secondStartY, x2, y2);
+  }
+
+  const outputBandMm = splitDimensionMm * halfWithOverlap * tapeScale;
   return {
-    sourceX: crop.x * shippingPdfCanvas.width,
-    sourceY: crop.y * shippingPdfCanvas.height,
-    sourceWidth: crop.width * shippingPdfCanvas.width,
-    sourceHeight: crop.height * shippingPdfCanvas.height,
-    topSourceHeight: crop.height * shippingPdfCanvas.height * (0.5 + overlapFraction / 2),
-    bottomSourceY: (crop.y + crop.height * (0.5 - overlapFraction / 2)) * shippingPdfCanvas.height,
-    bottomSourceHeight: crop.height * shippingPdfCanvas.height * (0.5 + overlapFraction / 2),
-    /* Keep the scale in the geometry passed to the print/export renderer.
-     * It uses this to render the source PDF at sufficient DPI before
-     * producing the final physical-size raster. */
+    axis: vertical ? "vertical" : "horizontal",
+    firstSourceX, firstSourceY, firstSourceWidth, firstSourceHeight,
+    secondSourceX, secondSourceY, secondSourceWidth, secondSourceHeight,
     tapeScale,
-    outputWidthMm: widthMm * tapeScale,
+    outputWidthMm: feedDimensionMm * tapeScale,
     outputOverlapMm: overlapMm,
     overlapFraction,
-    topHeightMm: (heightMm * (0.5 + overlapFraction / 2)) * tapeScale,
-    bottomHeightMm: (heightMm * (0.5 + overlapFraction / 2)) * tapeScale,
-    topPdfRect: shippingPdfRectFromViewport(x1, y1, x2, topEndY),
-    bottomPdfRect: shippingPdfRectFromViewport(x1, bottomStartY, x2, y2)
+    topHeightMm: outputBandMm,
+    bottomHeightMm: outputBandMm,
+    topPdfRect: firstPdfRect,
+    bottomPdfRect: secondPdfRect
   };
 }
 
@@ -4624,27 +4690,31 @@ function createShippingCropCanvas() {
   return canvas;
 }
 
-function drawShippingSplitCanvas(canvas, sourceCanvas, sourceX, sourceY, sourceWidth, sourceHeight) {
-  /* Show the split strip in print orientation: the 58.9 mm printable band
-   * is vertical, while feed length is horizontal. */
+function drawShippingSplitCanvas(canvas, sourceCanvas, sourceX, sourceY, sourceWidth, sourceHeight,
+                                rotateClockwise = true) {
+  /* Show each half in its final page orientation. Horizontal splits produce
+   * landscape source halves that are rotated clockwise for the tape. Vertical
+   * splits produce portrait halves, so they retain their source orientation. */
   const maxPreviewSide = 1000;
   const previewScale = Math.min(1, maxPreviewSide / Math.max(sourceWidth, sourceHeight));
   const targetWidth = Math.max(1, Math.round(sourceWidth * previewScale));
   const targetHeight = Math.max(1, Math.round(sourceHeight * previewScale));
-  canvas.width = targetHeight;
-  canvas.height = targetWidth;
+  canvas.width = rotateClockwise ? targetHeight : targetWidth;
+  canvas.height = rotateClockwise ? targetWidth : targetHeight;
   const context = canvas.getContext("2d", { alpha: false });
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
   context.fillStyle = "#fff";
   context.fillRect(0, 0, canvas.width, canvas.height);
-  /* Rotate the source 90 degrees clockwise into feed-length x tape-width
-   * coordinates. A true rotation preserves reading direction; transposing
-   * the axes here would mirror the artwork. */
-  context.setTransform(0, 1, -1, 0, targetHeight, 0);
-  context.drawImage(sourceCanvas, sourceX, sourceY, sourceWidth, sourceHeight,
-                    0, 0, targetWidth, targetHeight);
-  context.setTransform(1, 0, 0, 1, 0, 0);
+  if (rotateClockwise) {
+    context.setTransform(0, 1, -1, 0, targetHeight, 0);
+    context.drawImage(sourceCanvas, sourceX, sourceY, sourceWidth, sourceHeight,
+                      0, 0, targetWidth, targetHeight);
+    context.setTransform(1, 0, 0, 1, 0, 0);
+  } else {
+    context.drawImage(sourceCanvas, sourceX, sourceY, sourceWidth, sourceHeight,
+                      0, 0, targetWidth, targetHeight);
+  }
 }
 
 function updateShippingSplitPreview() {
@@ -4671,11 +4741,13 @@ function updateShippingSplitPreview() {
   try {
     const cropCanvas = createShippingCropCanvas();
     if (!cropCanvas) return;
-    drawShippingSplitCanvas(shippingSplitTopCanvas, cropCanvas, 0, 0,
-                            cropCanvas.width, cropCanvas.height * (0.5 + geometry.overlapFraction / 2));
-    drawShippingSplitCanvas(shippingSplitBottomCanvas, cropCanvas, 0,
-                            cropCanvas.height * (0.5 - geometry.overlapFraction / 2),
-                            cropCanvas.width, cropCanvas.height * (0.5 + geometry.overlapFraction / 2));
+    const rotatePreview = geometry.axis === "horizontal";
+    drawShippingSplitCanvas(shippingSplitTopCanvas, cropCanvas,
+                            geometry.firstSourceX, geometry.firstSourceY,
+                            geometry.firstSourceWidth, geometry.firstSourceHeight, rotatePreview);
+    drawShippingSplitCanvas(shippingSplitBottomCanvas, cropCanvas,
+                            geometry.secondSourceX, geometry.secondSourceY,
+                            geometry.secondSourceWidth, geometry.secondSourceHeight, rotatePreview);
   } catch (err) {
     log(err.message, false);
     shippingCropSelection.split = null;
@@ -4761,13 +4833,22 @@ async function createShippingSplitOutputCanvases(crop, geometry, pdfDocument) {
   const cropCanvas = await createShippingCropCanvasAtPrintDpi(crop, pdfDocument, sourceRenderDpi);
   try {
     const splitFraction = geometry.overlapFraction;
-    const halfSourceHeight = cropCanvas.height * (0.5 + splitFraction / 2);
-    const bottomSourceY = cropCanvas.height * (0.5 - splitFraction / 2);
-    const topCanvas = makeShippingPdfPageCanvas(cropCanvas, 0, halfSourceHeight,
-                                                 geometry.topHeightMm, geometry.outputWidthMm);
-    const bottomCanvas = makeShippingPdfPageCanvas(cropCanvas, bottomSourceY, halfSourceHeight,
-                                                    geometry.bottomHeightMm, geometry.outputWidthMm);
-    return { dpi, topCanvas, bottomCanvas };
+    const halfWithOverlap = 0.5 + splitFraction / 2;
+    let firstRect, secondRect;
+    if (geometry.axis === "vertical") {
+      firstRect = { x: 0, y: 0, width: cropCanvas.width * halfWithOverlap, height: cropCanvas.height };
+      secondRect = { x: cropCanvas.width * (0.5 - splitFraction / 2), y: 0,
+                     width: cropCanvas.width * halfWithOverlap, height: cropCanvas.height };
+    } else {
+      firstRect = { x: 0, y: 0, width: cropCanvas.width, height: cropCanvas.height * halfWithOverlap };
+      secondRect = { x: 0, y: cropCanvas.height * (0.5 - splitFraction / 2),
+                     width: cropCanvas.width, height: cropCanvas.height * halfWithOverlap };
+    }
+    const firstCanvas = makeShippingPdfPageCanvas(cropCanvas, firstRect,
+      geometry.topHeightMm, geometry.outputWidthMm, geometry.axis);
+    const secondCanvas = makeShippingPdfPageCanvas(cropCanvas, secondRect,
+      geometry.bottomHeightMm, geometry.outputWidthMm, geometry.axis);
+    return { dpi, topCanvas: firstCanvas, bottomCanvas: secondCanvas };
   } finally {
     /* The two final print-size canvases are now independent of this larger
      * intermediate render. Release its backing store before encoding/printing. */
@@ -4799,13 +4880,13 @@ function makeShippingPrintRasterFromPageCanvas(pageCanvas) {
   return canvas;
 }
 
-/* Build the QL-700 raster in printer order: canvas.width is the dynamic
- * feed length and canvas.height is the cross-tape width (at most 696 dots).
- * Source X maps to feed rows and source Y maps across the print head. Flip
- * only the cross-tape axis to match the print-head dot order. Do not rotate
- * or swap axes in this raster: that distorts the aspect ratio and makes the
- * content upside down when it is later converted to the visual PDF page. */
-function makeShippingPdfPageCanvas(sourceCanvas, sourceY, sourceHeight, tapeWidthMm, feedLengthMm) {
+/* Build the shared 90-degree page canvas in printer order: canvas.width is
+ * the dynamic feed length and canvas.height is the cross-tape width (at most
+ * 696 dots). Horizontal splits map source X to feed and source Y across the
+ * print head; vertical splits map source Y to feed and source X across the
+ * print head. The vertical branch transposes without rotating so its already
+ * portrait source artwork remains upright in the exported PDF. */
+function makeShippingPdfPageCanvas(sourceCanvas, sourceRect, tapeWidthMm, feedLengthMm, axis = "horizontal") {
   const dpi = currentDpi();
   const widthDots = Math.max(1, Math.min(QL700_TAPE.print, Math.round(tapeWidthMm * dpi / 25.4)));
   const rows = Math.round(feedLengthMm * dpi / 25.4);
@@ -4820,15 +4901,27 @@ function makeShippingPdfPageCanvas(sourceCanvas, sourceY, sourceHeight, tapeWidt
   context.fillRect(0, 0, rows, widthDots);
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
-  /* Keep one uniform scale factor: source width -> feed rows and source
-   * split-height -> print-head dots. Only reverse the head-dot axis. */
-  context.translate(0, widthDots);
-  context.scale(1, -1);
-  context.drawImage(sourceCanvas, 0, sourceY, sourceCanvas.width, sourceHeight,
-                    0, 0, rows, widthDots);
+
+  if (axis === "vertical") {
+    /* With a vertical source divider, source Y is the feed direction and
+     * source X is the cross-tape dimension. Transpose those axes into the
+     * printer's rows x head-dots buffer without changing the source reading
+     * orientation. makeShippingPdfExportCanvas transposes it back for PDF. */
+    context.setTransform(0, 1, 1, 0, 0, 0);
+    context.drawImage(sourceCanvas, sourceRect.x, sourceRect.y,
+      sourceRect.width, sourceRect.height, 0, 0, rows, widthDots);
+  } else {
+    /* Horizontal source divider: source X follows the feed and source Y
+     * spans the tape. Reverse only the cross-tape axis for print-head order. */
+    context.translate(0, widthDots);
+    context.scale(1, -1);
+    context.drawImage(sourceCanvas, sourceRect.x, sourceRect.y,
+      sourceRect.width, sourceRect.height, 0, 0, rows, widthDots);
+  }
   context.setTransform(1, 0, 0, 1, 0, 0);
   return canvas;
 }
+
 function shippingPdfAscii(text) {
   return new TextEncoder().encode(text);
 }
@@ -5306,10 +5399,16 @@ shippingPageNext.addEventListener("click", async () => {
   catch (err) { log(`could not render PDF page: ${err.message}`, false); }
 });
 shippingCropReset.addEventListener("click", resetShippingCrop);
+shippingSplitAxisInput.addEventListener("change", () => {
+  updateShippingSplitModeLabels();
+  updateShippingSplitGuide();
+  updateShippingSplitPreview();
+});
 shippingSplitOverlapInput.addEventListener("input", () => {
   updateShippingSplitGuide();
   updateShippingSplitPreview();
 });
+updateShippingSplitModeLabels();
 
 function shippingPointerPosition(e) {
   const box = shippingPdfSelect.getBoundingClientRect();
