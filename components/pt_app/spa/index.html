@@ -7071,6 +7071,47 @@ document.getElementById("api-host-clear").addEventListener("click", () => {
   refreshStatus();
 });
 
+/* Device diagnostics -- persistent ring buffer fetched only on demand. */
+{
+  const panel = document.createElement("div");
+  panel.className = "panel";
+  panel.innerHTML = `
+    <h2>Device logs</h2>
+    <p class="muted">Latest 20 connectivity and startup events. Stored in flash and preserved across reboots and power loss; older entries are overwritten as new events arrive. In setup AP mode, open http://192.168.4.1/api/logs directly.</p>
+    <div class="row">
+      <button id="device-logs-refresh" class="secondary" type="button">Refresh logs</button>
+      <span id="device-logs-status" class="muted" aria-live="polite"></span>
+    </div>
+    <pre id="device-logs-output" aria-live="polite">Click Refresh logs to read the saved device events.</pre>
+  `;
+  const output = panel.querySelector("#device-logs-output");
+  output.style.cssText = "margin:.45rem 0 0;padding:.65rem;max-height:24rem;overflow:auto;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--muted);font:.76rem/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere;";
+  document.getElementById("api-host").closest(".panel")
+    .insertAdjacentElement("afterend", panel);
+
+  const status = panel.querySelector("#device-logs-status");
+  const button = panel.querySelector("#device-logs-refresh");
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    status.textContent = "Loading…";
+    try {
+      const response = await fetch(apiURL("/api/logs"), { cache: "no-store" });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const data = await response.json();
+      if (!data.ok || !Array.isArray(data.entries))
+        throw new Error(data.error || "Invalid response from device");
+      output.textContent = data.entries.length
+        ? data.entries.join("\n")
+        : "No persistent device events yet.";
+      status.textContent = `Showing ${data.entries.length} / 20 recent events`;
+    } catch (error) {
+      status.textContent = `Could not load device logs: ${error.message || error}`;
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
 /* Language picker -- currently only the inline EN locale is shipped;
  * additional <option>s appear once translation files arrive in
  * spa/i18n/<lang>.json. See setLanguage() for the load path. */

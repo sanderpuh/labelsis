@@ -9,6 +9,7 @@
 #include "pt_app.h"
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,6 +40,141 @@
 #include "pt_transport_usb_host.h"
 
 static const char *TAG = "pt_app";
+
+
+/* Persistent diagnostics. Keep the latest 20 important events in a separate
+ * NVS namespace so they survive ESP resets and full power cycles. Individual
+ * NVS keys are used for ring slots (rather than rewriting one large blob on
+ * every event) to limit flash writes. This deliberately records selected
+ * state transitions, not every ESP_LOG line. */
+#define DEVICE_LOG_CAPACITY 20
+#define DEVICE_LOG_LINE_MAX 160
+#define DEVICE_LOG_NS       "pt_diag"
+#define DEVICE_LOG_NEXT_KEY "next"
+#define DEVICE_LOG_COUNT_KEY "count"
+#define DEVICE_LOG_BOOT_KEY "boot"
+
+static char s_device_log_lines[DEVICE_LOG_CAPACITY][DEVICE_LOG_LINE_MAX];
+static char s_device_log_snapshot[DEVICE_LOG_CAPACITY][DEVICE_LOG_LINE_MAX];
+static size_t s_device_log_count;
+static size_t s_device_log_next;
+static uint32_t s_device_log_boot;
+static nvs_handle_t s_device_log_nvs;
+static SemaphoreHandle_t s_device_log_mutex;
+static bool s_device_log_ready;
+
+static const char *device_reset_reason_name(esp_reset_reason_t reason)
+{
+    switch (reason) {
+        case ESP_RST_POWERON:  return "power_on";
+        case ESP_RST_EXT:      return "external";
+        case ESP_RST_SW:       return "software";
+        case ESP_RST_PANIC:    return "panic";
+        case ESP_RST_INT_WDT:  return "interrupt_wdt";
+        case ESP_RST_TASK_WDT: return "task_wdt";
+        case ESP_RST_WDT:      return "watchdog";
+        case ESP_RST_DEEPSLEEP:return "deep_sleep";
+        case ESP_RST_BROWNOUT: return "brownout";
+        case ESP_RST_SDIO:     return "sdio";
+        default:               return "unknown";
+    }
+}
+
+static void device_log_event(const char *level, const char *format, ...)
+{
+    if (!s_device_log_ready || !s_device_log_mutex) return;
+
+    char message[96] = {0};
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+
+    const uint64_t uptime_ms = (uint64_t)(esp_timer_get_time() / 1000);
+    char line[DEVICE_LOG_LINE_MAX] = {0};
+    snprintf(line, sizeof(line), "B%lu +%llu.%03llu %-4s %s",
+             (unsigned long)s_device_log_boot,
+             (unsigned long long)(uptime_ms / 1000),
+             (unsigned long long)(uptime_ms % 1000),
+             level, message);
+
+    if (xSemaphoreTake(s_device_log_mutex, pdMS_TO_TICKS(1000)) != pdTRUE)
+        return;
+
+    const size_t slot = s_device_log_next;
+    char key[8];
+    snprintf(key, sizeof(key), "l%02u", (unsigned)slot);
+
+    /* Update RAM first so the current boot still exposes the event if an
+     * NVS write fails. The NVS copy is what makes it survive a reboot. */
+    snprintf(s_device_log_lines[slot], DEVICE_LOG_LINE_MAX, "%s", line);
+    s_device_log_next = (slot + 1) % DEVICE_LOG_CAPACITY;
+    if (s_device_log_count < DEVICE_LOG_CAPACITY) s_device_log_count++;
+
+    esp_err_t err = nvs_set_str(s_device_log_nvs, key, line);
+    if (err == ESP_OK)
+        err = nvs_set_u8(s_device_log_nvs, DEVICE_LOG_NEXT_KEY,
+                         (uint8_t)s_device_log_next);
+    if (err == ESP_OK)
+        err = nvs_set_u8(s_device_log_nvs, DEVICE_LOG_COUNT_KEY,
+                         (uint8_t)s_device_log_count);
+    if (err == ESP_OK) err = nvs_commit(s_device_log_nvs);
+
+    xSemaphoreGive(s_device_log_mutex);
+    if (err != ESP_OK)
+        ESP_LOGW(TAG, "diagnostics: NVS write failed: %s", esp_err_to_name(err));
+}
+
+static void device_log_init(void)
+{
+    s_device_log_mutex = xSemaphoreCreateMutex();
+    if (!s_device_log_mutex) {
+        ESP_LOGW(TAG, "diagnostics: mutex creation failed; persistent log disabled");
+        return;
+    }
+
+    esp_err_t err = nvs_open(DEVICE_LOG_NS, NVS_READWRITE, &s_device_log_nvs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "diagnostics: NVS open failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    uint8_t next = 0, count = 0;
+    uint32_t boot = 0;
+    nvs_get_u8(s_device_log_nvs, DEVICE_LOG_NEXT_KEY, &next);
+    nvs_get_u8(s_device_log_nvs, DEVICE_LOG_COUNT_KEY, &count);
+    nvs_get_u32(s_device_log_nvs, DEVICE_LOG_BOOT_KEY, &boot);
+    if (next >= DEVICE_LOG_CAPACITY || count > DEVICE_LOG_CAPACITY) {
+        next = 0;
+        count = 0;
+    }
+    s_device_log_next = next;
+    s_device_log_count = count;
+    s_device_log_boot = boot + 1;
+
+    for (size_t i = 0; i < DEVICE_LOG_CAPACITY; ++i) {
+        char key[8];
+        snprintf(key, sizeof(key), "l%02u", (unsigned)i);
+        size_t length = sizeof(s_device_log_lines[i]);
+        if (nvs_get_str(s_device_log_nvs, key, s_device_log_lines[i],
+                        &length) != ESP_OK) {
+            s_device_log_lines[i][0] = '\0';
+        }
+    }
+
+    err = nvs_set_u32(s_device_log_nvs, DEVICE_LOG_BOOT_KEY,
+                      s_device_log_boot);
+    if (err == ESP_OK) err = nvs_commit(s_device_log_nvs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "diagnostics: boot counter save failed: %s",
+                 esp_err_to_name(err));
+    }
+
+    s_device_log_ready = true;
+    device_log_event("INFO", "boot reset=%s code=%d",
+                     device_reset_reason_name(esp_reset_reason()),
+                     (int)esp_reset_reason());
+}
 
 /* Wi-Fi creds (NVS) -- ordered list of APs.
  *
@@ -423,22 +559,59 @@ static bool               s_wifi_reconnect_timer_ready;
 static bool               s_wifi_ever_connected;
 static uint32_t           s_wifi_reconnect_delay_ms = WIFI_RECONNECT_MIN_MS;
 
+static void wifi_schedule_runtime_reconnect(void);
+static volatile bool s_wifi_has_ip;
+static int64_t s_wifi_last_persisted_retry_us;
+static int64_t s_wifi_last_disconnect_log_us;
+static int64_t s_wifi_last_connect_error_log_us;
+static int s_wifi_last_disconnect_reason = -1;
+
 static void wifi_runtime_reconnect_timer_cb(void *arg)
 {
     (void)arg;
+    if (s_wifi_has_ip) return;  /* GOT_IP may race with this timer firing. */
     esp_err_t err = esp_wifi_connect();
-    if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "wifi: reconnect request accepted");
+        /* Keep a watchdog armed until GOT_IP confirms recovery. If the
+         * driver accepts a request but never emits a completion event, the
+         * next timer tick will make another controlled attempt. */
+        wifi_schedule_runtime_reconnect();
+    } else if (err == ESP_ERR_WIFI_CONN) {
+        /* The driver reports this when a previous attempt is still in
+         * CONNECTING state. Keep a watchdog retry armed in case the driver
+         * never delivers the expected disconnect event for that attempt. */
+        ESP_LOGI(TAG, "wifi: reconnect request already in progress");
+        wifi_schedule_runtime_reconnect();
+    } else {
+        const int64_t now_us = esp_timer_get_time();
+        if (s_wifi_last_connect_error_log_us == 0 ||
+            now_us - s_wifi_last_connect_error_log_us >= 120000000LL) {
+            device_log_event("ERROR", "esp_wifi_connect failed: %s (%d)",
+                             esp_err_to_name(err), (int)err);
+            s_wifi_last_connect_error_log_us = now_us;
+        }
         ESP_LOGW(TAG, "wifi: scheduled reconnect failed: %s", esp_err_to_name(err));
+        /* esp_wifi_connect() only starts one attempt. If the call itself
+         * fails, there may be no STA_DISCONNECTED event to trigger another
+         * attempt, so explicitly arm the backoff timer again. */
+        wifi_schedule_runtime_reconnect();
     }
 }
 
 static void wifi_schedule_runtime_reconnect(void)
 {
+    /* Do not arm a stale retry after IP_EVENT_STA_GOT_IP has already
+     * completed recovery (including a race with the timer callback). */
+    if (s_wifi_has_ip) return;
     if (!s_wifi_reconnect_timer_ready) {
         /* Timer creation is best-effort; preserve reconnection if it failed. */
         esp_err_t err = esp_wifi_connect();
-        if (err != ESP_OK && err != ESP_ERR_WIFI_CONN)
+        if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
+            device_log_event("ERROR", "reconnect fallback failed: %s (%d)",
+                             esp_err_to_name(err), (int)err);
             ESP_LOGW(TAG, "wifi: reconnect fallback failed: %s", esp_err_to_name(err));
+        }
         return;
     }
     if (esp_timer_is_active(s_wifi_reconnect_timer)) return;
@@ -450,10 +623,20 @@ static void wifi_schedule_runtime_reconnect(void)
         ESP_LOGW(TAG, "wifi: could not schedule reconnect: %s; trying immediately",
                  esp_err_to_name(err));
         esp_err_t connect_err = esp_wifi_connect();
-        if (connect_err != ESP_OK && connect_err != ESP_ERR_WIFI_CONN)
+        if (connect_err != ESP_OK && connect_err != ESP_ERR_WIFI_CONN) {
+            device_log_event("ERROR", "immediate reconnect failed: %s (%d)",
+                             esp_err_to_name(connect_err), (int)connect_err);
             ESP_LOGW(TAG, "wifi: immediate reconnect failed: %s",
                      esp_err_to_name(connect_err));
+        }
         return;
+    }
+    const int64_t now_us = esp_timer_get_time();
+    if (s_wifi_last_persisted_retry_us == 0 ||
+        now_us - s_wifi_last_persisted_retry_us >= 120000000LL) {
+        device_log_event("WARN", "Wi-Fi reconnect pending; next attempt in %lu ms",
+                         (unsigned long)delay_ms);
+        s_wifi_last_persisted_retry_us = now_us;
     }
     ESP_LOGW(TAG, "wifi: link lost; retrying in %lu ms",
              (unsigned long)delay_ms);
@@ -475,9 +658,30 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         wifi_config_t cur;
         if (esp_wifi_get_config(WIFI_IF_STA, &cur) == ESP_OK
             && cur.sta.ssid[0] != 0) {
-            esp_wifi_connect();
+            esp_err_t connect_err = esp_wifi_connect();
+            if (connect_err != ESP_OK && connect_err != ESP_ERR_WIFI_CONN) {
+                device_log_event("ERROR", "STA start connect failed: %s (%d)",
+                                 esp_err_to_name(connect_err), (int)connect_err);
+                ESP_LOGW(TAG, "wifi: STA start connect failed: %s",
+                         esp_err_to_name(connect_err));
+            }
         }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        const wifi_event_sta_disconnected_t *disconnected =
+            (const wifi_event_sta_disconnected_t *)data;
+        const int reason = disconnected ? (int)disconnected->reason : -1;
+        const bool had_ip = s_wifi_has_ip;
+        const int64_t now_us = esp_timer_get_time();
+        s_wifi_has_ip = false;
+        pt_led_set(PT_LED_STA_CONNECTING);
+        if (had_ip || reason != s_wifi_last_disconnect_reason ||
+            s_wifi_last_disconnect_log_us == 0 ||
+            now_us - s_wifi_last_disconnect_log_us >= 120000000LL) {
+            device_log_event("WARN", "STA disconnected reason=%d had_ip=%d",
+                             reason, had_ip ? 1 : 0);
+            s_wifi_last_disconnect_reason = reason;
+            s_wifi_last_disconnect_log_us = now_us;
+        }
         if (s_wifi_ever_connected) {
             /* Runtime outages must not consume the startup retry budget or
              * leave the HTTP server permanently disconnected from Wi-Fi. */
@@ -492,13 +696,38 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *e = data;
+        s_wifi_has_ip = true;
         ESP_LOGI(TAG, "got IP: " IPSTR, IP2STR(&e->ip_info.ip));
+        device_log_event("INFO", "STA got IP " IPSTR " ip_change=%d",
+                         IP2STR(&e->ip_info.ip), e->ip_changed ? 1 : 0);
         s_wifi_ever_connected = true;
         s_retry_count = 0;
         s_wifi_reconnect_delay_ms = WIFI_RECONNECT_MIN_MS;
+        s_wifi_last_persisted_retry_us = 0;
+        s_wifi_last_disconnect_log_us = 0;
+        s_wifi_last_connect_error_log_us = 0;
+        s_wifi_last_disconnect_reason = -1;
         if (s_wifi_reconnect_timer_ready && esp_timer_is_active(s_wifi_reconnect_timer))
             esp_timer_stop(s_wifi_reconnect_timer);
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_LOST_IP) {
+        s_wifi_has_ip = false;
+        pt_led_set(PT_LED_STA_CONNECTING);
+        device_log_event("ERROR", "STA lost IPv4 address");
+        ESP_LOGE(TAG, "wifi: station lost IPv4 address; restarting association");
+        /* The station can lose its lease while remaining associated. Force
+         * a clean disconnect so the normal runtime reconnect path runs. */
+        esp_err_t disconnect_err = esp_wifi_disconnect();
+        if (disconnect_err != ESP_OK) {
+            device_log_event("ERROR", "disconnect after IP loss failed: %s (%d)",
+                             esp_err_to_name(disconnect_err), (int)disconnect_err);
+            ESP_LOGW(TAG, "wifi: disconnect after IP loss failed: %s",
+                     esp_err_to_name(disconnect_err));
+        }
+        /* Do not depend solely on a follow-up STA_DISCONNECTED event: the
+         * delayed IP-loss event can occur while the radio still appears
+         * associated. Keep the reconnect watchdog armed either way. */
+        wifi_schedule_runtime_reconnect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STACONNECTED) {
         ESP_LOGI(TAG, "ap: client joined");
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STADISCONNECTED) {
@@ -532,6 +761,8 @@ static esp_err_t wifi_init_once(void)
     if (timer_err == ESP_OK) {
         s_wifi_reconnect_timer_ready = true;
     } else {
+        device_log_event("ERROR", "Wi-Fi reconnect timer create failed: %s (%d)",
+                         esp_err_to_name(timer_err), (int)timer_err);
         ESP_LOGW(TAG, "wifi: reconnect timer unavailable: %s; using direct retries",
                  esp_err_to_name(timer_err));
     }
@@ -546,6 +777,8 @@ static esp_err_t wifi_init_once(void)
         WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        IP_EVENT, IP_EVENT_STA_LOST_IP, &wifi_event_handler, NULL, NULL));
 
     inited = true;
     return ESP_OK;
@@ -717,15 +950,21 @@ static void transport_monitor_task(void *arg)
         if (ready != last_ready) {
             if (ready) {
                 ESP_LOGI(TAG, "transport: QL-700 online");
+                device_log_event("INFO", "USB printer attached");
                 pt_led_set(PT_LED_READY);
             } else {
                 ESP_LOGW(TAG, "transport: QL-700 disconnected");
+                device_log_event("WARN", "USB printer detached");
                 s_transport_state = "waiting";
                 pt_led_set(PT_LED_USB_WAITING);
             }
             last_ready = ready;
         }
-        if (!ready) transport_try_usb(1500);
+        if (!ready) ready = transport_try_usb(1500);
+        /* USB state alone is not enough to describe the device: keep the
+         * LED blue while Wi-Fi/IP is unavailable, then show printer state. */
+        pt_led_set(!s_wifi_has_ip ? PT_LED_STA_CONNECTING
+                                  : (ready ? PT_LED_READY : PT_LED_USB_WAITING));
     }
 }
 
@@ -1064,6 +1303,68 @@ static esp_err_t api_info(httpd_req_t *req)
         return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"overflow\"}");
     }
     return httpd_resp_send(req, body, length);
+}
+
+/* GET /api/logs -- persistent diagnostic events, oldest first. */
+static esp_err_t api_logs(httpd_req_t *req)
+{
+    size_t count = 0;
+    if (!s_device_log_ready || !s_device_log_mutex) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"diagnostics_unavailable\"}");
+    }
+
+    if (xSemaphoreTake(s_device_log_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req,
+            "{\"ok\":false,\"error\":\"diagnostics_busy\"}");
+    }
+    count = s_device_log_count;
+    const size_t first = (s_device_log_next + DEVICE_LOG_CAPACITY - count)
+                         % DEVICE_LOG_CAPACITY;
+    for (size_t i = 0; i < count; ++i) {
+        const size_t slot = (first + i) % DEVICE_LOG_CAPACITY;
+        memcpy(s_device_log_snapshot[i], s_device_log_lines[slot],
+               DEVICE_LOG_LINE_MAX);
+        s_device_log_snapshot[i][DEVICE_LOG_LINE_MAX - 1] = '\0';
+    }
+    xSemaphoreGive(s_device_log_mutex);
+
+    cors_headers(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "Connection", "close");
+
+    char header[80];
+    int header_len = snprintf(header, sizeof(header),
+                              "{\"ok\":true,\"count\":%u,\"entries\":[",
+                              (unsigned)count);
+    if (header_len < 0 || (size_t)header_len >= sizeof(header)) return ESP_FAIL;
+    esp_err_t err = httpd_resp_send_chunk(req, header, header_len);
+    if (err != ESP_OK) return err;
+
+    for (size_t i = 0; i < count; ++i) {
+        char escaped[DEVICE_LOG_LINE_MAX * 2 + 3];
+        size_t off = 0;
+        escaped[off++] = '"';
+        for (const unsigned char *p = (const unsigned char *)s_device_log_snapshot[i];
+             *p && off < sizeof(escaped) - 3; ++p) {
+            if (*p == '"' || *p == '\\') escaped[off++] = '\\';
+            if (*p < 0x20) continue;
+            escaped[off++] = (char)*p;
+        }
+        escaped[off++] = '"';
+        escaped[off] = '\0';
+        if (i) {
+            err = httpd_resp_send_chunk(req, ",", 1);
+            if (err != ESP_OK) return err;
+        }
+        err = httpd_resp_send_chunk(req, escaped, (ssize_t)off);
+        if (err != ESP_OK) return err;
+    }
+    err = httpd_resp_send_chunk(req, "]}", 2);
+    if (err != ESP_OK) return err;
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 /* SPA assets embedded via EMBED_FILES in CMakeLists.txt. The text
@@ -1793,7 +2094,7 @@ static esp_err_t http_up(uint16_t port)
     /* Wildcard matching enables the OPTIONS catch-all below; specific
      * routes still match exactly. */
     cfg.uri_match_fn     = httpd_uri_match_wildcard;
-    /* Default is 8; we register 21 routes (status, info, print, cut,
+    /* Default is 8; we register 22 routes (status, info, logs, print, cut,
      * feed, scan, setup, index, fonts*2, favicon, ota*2, wifi*5,
      * reboot, ota/erase-next, OPTIONS catch-all) and want headroom. */
     cfg.max_uri_handlers = 24;
@@ -1819,6 +2120,10 @@ static esp_err_t http_up(uint16_t port)
     static const httpd_uri_t info_route = {
         .uri = "/api/info", .method = HTTP_GET,
         .handler = api_info, .user_ctx = NULL,
+    };
+    static const httpd_uri_t logs_route = {
+        .uri = "/api/logs", .method = HTTP_GET,
+        .handler = api_logs, .user_ctx = NULL,
     };
     static const httpd_uri_t ql700_bitmap_route = {
         .uri = "/api/ql700/print", .method = HTTP_POST,
@@ -1894,6 +2199,7 @@ static esp_err_t http_up(uint16_t port)
     };
     httpd_register_uri_handler(s_http, &status_route);
     httpd_register_uri_handler(s_http, &info_route);
+    httpd_register_uri_handler(s_http, &logs_route);
     httpd_register_uri_handler(s_http, &ql700_test_route);
     httpd_register_uri_handler(s_http, &ql700_bitmap_route);
     httpd_register_uri_handler(s_http, &scan_route);
@@ -2224,6 +2530,10 @@ static esp_err_t http_ap_up(void)
         .uri = "/api/setup", .method = HTTP_POST,
         .handler = api_setup, .user_ctx = NULL,
     };
+    static const httpd_uri_t logs_route = {
+        .uri = "/api/logs", .method = HTTP_GET,
+        .handler = api_logs, .user_ctx = NULL,
+    };
     /* Catch-all serves the setup page for any GET (incl. captive-
      * portal probe URLs). Registered last; specific routes win. */
     static const httpd_uri_t catch_all = {
@@ -2236,6 +2546,7 @@ static esp_err_t http_ap_up(void)
     };
     httpd_register_uri_handler(s_http, &scan_route);
     httpd_register_uri_handler(s_http, &setup_route);
+    httpd_register_uri_handler(s_http, &logs_route);
     httpd_register_uri_handler(s_http, &catch_all);
     httpd_register_uri_handler(s_http, &cors_route);
     return ESP_OK;
@@ -2265,6 +2576,12 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
     }
+
+    /* Load the previous boot's events before writing this boot marker.
+     * Unlike a RAM ring, the NVS ring survives reset and power cycling. */
+    device_log_init();
+    device_log_event("INFO", "diagnostics ring ready (%d persistent entries)",
+                     DEVICE_LOG_CAPACITY);
 
     s_printer_mutex = xSemaphoreCreateMutex();
     if (!s_printer_mutex) return ESP_ERR_NO_MEM;
@@ -2347,6 +2664,7 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
                 break;
             }
             ESP_LOGW(TAG, "wifi: %s failed", ap->ssid);
+            device_log_event("WARN", "configured AP connection failed (slot %d)", idx);
         }
         if (!connected) {
             ESP_LOGW(TAG, "wifi: %d configured APs %s-- entering AP onboarding",
@@ -2358,6 +2676,7 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
     bool ap_mode = !connected;
 
     if (ap_mode) {
+        device_log_event("ERROR", "station startup failed; entering AP onboarding");
         pt_led_set(PT_LED_AP_ONBOARDING);
         if (wifi_ap_up(AP_SETUP_SSID) != ESP_OK) {
             ESP_LOGE(TAG, "wifi: AP up failed");
@@ -2365,8 +2684,10 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
         }
         if (http_ap_up() != ESP_OK) {
             ESP_LOGE(TAG, "http: AP server failed");
+            device_log_event("ERROR", "AP onboarding HTTP server failed");
             return ESP_FAIL;
         }
+        device_log_event("INFO", "setup AP active; diagnostics at /api/logs");
         /* DNS hijack so phones pop the captive-portal sheet straight
          * onto the setup page -- no manual URL needed. Best effort:
          * onboarding still works if it fails, just less smoothly. */
@@ -2391,9 +2712,12 @@ esp_err_t pt_app_run(const pt_app_config_t *cfg)
 
     if (http_up(cfg->http_port) != ESP_OK) {
         ESP_LOGE(TAG, "http: failed");
+        device_log_event("ERROR", "HTTP server start failed");
         return ESP_FAIL;
     }
     ESP_LOGI(TAG, "http: serving on port %u", cfg->http_port ? cfg->http_port : 80);
+    device_log_event("INFO", "HTTP server started on port %u",
+                     cfg->http_port ? cfg->http_port : 80);
     /* Arm the BOOT button's OTA-gate gesture only now that the device
      * is actually serving requests -- otherwise an early tap could
      * flip the gate before any client could reach /api/ota anyway. */
